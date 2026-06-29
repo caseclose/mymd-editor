@@ -50,15 +50,11 @@ MIT
 
 ## 推送到 GitHub
 
-本地仓库已初始化并完成首次提交。推送前请先登录 GitHub：
+仓库地址：[github.com/caseclose/mymd-editor](https://github.com/caseclose/mymd-editor)
+
+本地已配置作者为 `caseclose`。若在新机器上克隆后提交，请设置：
 
 ```powershell
-gh auth login
-gh repo create mymd --public --source=. --remote=origin --push
-```
-
-若仓库名已被占用，可改用其他名称：
-
-```powershell
-gh repo create mymd-editor --public --source=. --remote=origin --push
+git config user.name "caseclose"
+git config user.email "83827774+caseclose@users.noreply.github.com"
 ```
