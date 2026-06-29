@@ -47,14 +47,3 @@ npm run build:win    # 打包 Windows 安装程序（输出到 release/）
 ## 许可证
 
 MIT
-
-## 推送到 GitHub
-
-仓库地址：[github.com/caseclose/mymd-editor](https://github.com/caseclose/mymd-editor)
-
-本地已配置作者为 `caseclose`。若在新机器上克隆后提交，请设置：
-
-```powershell
-git config user.name "caseclose"
-git config user.email "83827774+caseclose@users.noreply.github.com"
-```
