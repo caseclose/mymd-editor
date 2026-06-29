@@ -1,0 +1,103 @@
+/* Typora-inspired light theme for markdown content */
+.mymd-content {
+  font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 16px;
+  line-height: 1.75;
+  color: #24292e;
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 32px 48px 80px;
+}
+
+.mymd-content h1,
+.mymd-content h2,
+.mymd-content h3,
+.mymd-content h4,
+.mymd-content h5,
+.mymd-content h6 {
+  font-weight: 600;
+  line-height: 1.35;
+  margin-top: 1.6em;
+  margin-bottom: 0.6em;
+  color: #1a1a1a;
+}
+
+.mymd-content h1 { font-size: 2em; border-bottom: 1px solid #eaecef; padding-bottom: 0.3em; }
+.mymd-content h2 { font-size: 1.6em; border-bottom: 1px solid #eaecef; padding-bottom: 0.3em; }
+.mymd-content h3 { font-size: 1.35em; }
+.mymd-content h4 { font-size: 1.15em; }
+.mymd-content h5 { font-size: 1em; }
+.mymd-content h6 { font-size: 0.9em; color: #6a737d; }
+
+.mymd-content p { margin: 0.8em 0; }
+.mymd-content a { color: #0366d6; text-decoration: none; }
+.mymd-content a:hover { text-decoration: underline; }
+
+.mymd-content blockquote {
+  margin: 1em 0;
+  padding: 0.2em 1em;
+  color: #6a737d;
+  border-left: 4px solid #dfe2e5;
+}
+
+.mymd-content ul,
+.mymd-content ol {
+  padding-left: 2em;
+  margin: 0.8em 0;
+}
+
+.mymd-content li { margin: 0.25em 0; }
+
+.mymd-content code {
+  font-family: "Cascadia Code", "Fira Code", Consolas, monospace;
+  font-size: 0.9em;
+  background: #f3f4f6;
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+}
+
+.mymd-content pre {
+  background: #f6f8fa;
+  border-radius: 6px;
+  padding: 16px;
+  overflow-x: auto;
+  margin: 1em 0;
+}
+
+.mymd-content pre code {
+  background: transparent;
+  padding: 0;
+}
+
+.mymd-content table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1em 0;
+}
+
+.mymd-content th,
+.mymd-content td {
+  border: 1px solid #dfe2e5;
+  padding: 8px 12px;
+}
+
+.mymd-content th {
+  background: #f6f8fa;
+  font-weight: 600;
+}
+
+.mymd-content hr {
+  border: none;
+  border-top: 1px solid #eaecef;
+  margin: 2em 0;
+}
+
+.mymd-content img {
+  max-width: 100%;
+  border-radius: 4px;
+}
+
+.mymd-content .task-list-item {
+  list-style: none;
+  margin-left: -1.5em;
+}

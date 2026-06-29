@@ -1,0 +1,97 @@
+@media print {
+  :root,
+  html,
+  body {
+    height: auto !important;
+    overflow: visible !important;
+    margin: 0;
+    padding: 0;
+  }
+
+  .mymd-export-body {
+    font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", sans-serif;
+    font-size: 14px;
+    line-height: 1.75;
+    color: #24292e;
+    padding: 0;
+    margin: 0;
+    overflow: visible !important;
+  }
+
+  .mymd-export-content {
+    max-width: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: visible !important;
+  }
+
+  .mymd-export-content h1,
+  .mymd-export-content h2,
+  .mymd-export-content h3 {
+    page-break-after: avoid;
+  }
+
+  .mymd-export-content pre,
+  .mymd-export-content blockquote,
+  .mymd-export-content table,
+  .mymd-export-content img {
+    page-break-inside: avoid;
+  }
+
+  .mymd-export-content pre {
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    background: #f6f8fa;
+    border-radius: 4px;
+    padding: 12px;
+  }
+
+  .mymd-export-content code {
+    font-family: Consolas, monospace;
+    background: #f3f4f6;
+    padding: 0.1em 0.3em;
+    border-radius: 3px;
+  }
+
+  .mymd-export-content pre code {
+    background: transparent;
+    padding: 0;
+  }
+
+  .mymd-export-content a {
+    color: #0366d6;
+    text-decoration: none;
+  }
+
+  .mymd-export-content blockquote {
+    border-left: 4px solid #dfe2e5;
+    padding-left: 1em;
+    color: #6a737d;
+    margin: 1em 0;
+  }
+
+  .mymd-export-content table {
+    border-collapse: collapse;
+    width: 100%;
+  }
+
+  .mymd-export-content th,
+  .mymd-export-content td {
+    border: 1px solid #dfe2e5;
+    padding: 6px 10px;
+  }
+
+  .mymd-export-content th {
+    background: #f6f8fa;
+  }
+
+  .mymd-export-content img {
+    max-width: 100%;
+  }
+
+  .mymd-export-content hr {
+    border: none;
+    border-top: 1px solid #eaecef;
+    margin: 1.5em 0;
+  }
+}

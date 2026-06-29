@@ -1,0 +1,224 @@
+import { app, shell, BrowserWindow, ipcMain, dialog, Menu } from 'electron'
+import { join } from 'path'
+import { electronApp, optimizer, is } from '@electron-toolkit/utils'
+import { readFile, writeFile } from 'fs/promises'
+import { exportHtmlToPdf } from './export-pdf'
+
+let mainWindow: BrowserWindow | null = null
+let pendingOpenPath: string | null = null
+
+function getArgvPath(): string | null {
+  const args = process.argv.slice(app.isPackaged ? 1 : 2)
+  const fileArg = args.find((arg) => !arg.startsWith('-') && arg.length > 0)
+  if (!fileArg) return null
+  return fileArg.replace(/[/\\]+$/, '')
+}
+
+function sendMenuAction(action: string): void {
+  mainWindow?.webContents.send('menu-action', action)
+}
+
+function buildMenu(): void {
+  const template: Electron.MenuItemConstructorOptions[] = [
+    {
+      label: '文件',
+      submenu: [
+        { label: '新建', accelerator: 'CmdOrCtrl+N', click: () => sendMenuAction('new') },
+        { label: '打开...', accelerator: 'CmdOrCtrl+O', click: () => sendMenuAction('open') },
+        { label: '保存', accelerator: 'CmdOrCtrl+S', click: () => sendMenuAction('save') },
+        { label: '另存为...', accelerator: 'CmdOrCtrl+Shift+S', click: () => sendMenuAction('save-as') },
+        { type: 'separator' },
+        { label: '导出 PDF...', accelerator: 'CmdOrCtrl+Shift+E', click: () => sendMenuAction('export-pdf') },
+        { type: 'separator' },
+        { role: 'quit', label: '退出' }
+      ]
+    },
+    {
+      label: '编辑',
+      submenu: [
+        { role: 'undo', label: '撤销' },
+        { role: 'redo', label: '重做' },
+        { type: 'separator' },
+        { role: 'cut', label: '剪切' },
+        { role: 'copy', label: '复制' },
+        { role: 'paste', label: '粘贴' },
+        { role: 'selectAll', label: '全选' }
+      ]
+    },
+    {
+      label: '视图',
+      submenu: [
+        { label: '切换主题', accelerator: 'CmdOrCtrl+Shift+T', click: () => sendMenuAction('toggle-theme') },
+        { type: 'separator' },
+        { role: 'reload', label: '重新加载' },
+        { role: 'toggleDevTools', label: '开发者工具' },
+        { type: 'separator' },
+        { role: 'resetZoom', label: '重置缩放' },
+        { role: 'zoomIn', label: '放大' },
+        { role: 'zoomOut', label: '缩小' },
+        { type: 'separator' },
+        { role: 'togglefullscreen', label: '全屏' }
+      ]
+    },
+    {
+      label: '帮助',
+      submenu: [
+        {
+          label: 'MyMD 关于',
+          click: () => {
+            dialog.showMessageBox(mainWindow!, {
+              type: 'info',
+              title: '关于 MyMD',
+              message: 'MyMD',
+              detail: 'Typora 风格的 Markdown 编辑器\n版本 1.0.0'
+            })
+          }
+        }
+      ]
+    }
+  ]
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template))
+}
+
+function createWindow(): void {
+  mainWindow = new BrowserWindow({
+    width: 1200,
+    height: 800,
+    minWidth: 800,
+    minHeight: 600,
+    show: false,
+    frame: false,
+    backgroundColor: '#ffffff',
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.js'),
+      sandbox: false,
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  })
+
+  mainWindow.on('ready-to-show', () => {
+    mainWindow?.show()
+    if (pendingOpenPath) {
+      mainWindow?.webContents.send('open-file-path', pendingOpenPath)
+      pendingOpenPath = null
+    }
+  })
+
+  mainWindow.on('close', (event) => {
+    mainWindow?.webContents.send('window-close-request')
+    event.preventDefault()
+  })
+
+  mainWindow.webContents.setWindowOpenHandler((details) => {
+    shell.openExternal(details.url)
+    return { action: 'deny' }
+  })
+
+  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
+    mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
+  } else {
+    mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
+  }
+}
+
+const gotLock = app.requestSingleInstanceLock()
+if (!gotLock) {
+  app.quit()
+} else {
+  app.on('second-instance', (_event, argv) => {
+    const pathArg = argv.slice(app.isPackaged ? 1 : 2).find((arg) => !arg.startsWith('-'))
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore()
+      mainWindow.focus()
+      if (pathArg) mainWindow.webContents.send('open-file-path', pathArg.replace(/[/\\]+$/, ''))
+    } else if (pathArg) {
+      pendingOpenPath = pathArg.replace(/[/\\]+$/, '')
+    }
+  })
+
+  app.whenReady().then(() => {
+    electronApp.setAppUserModelId('com.mymd.editor')
+    app.on('browser-window-created', (_, window) => optimizer.watchWindowShortcuts(window))
+
+    pendingOpenPath = getArgvPath()
+    buildMenu()
+    createWindow()
+
+    ipcMain.handle('file:open', async () => {
+      const result = await dialog.showOpenDialog(mainWindow!, {
+        properties: ['openFile'],
+        filters: [{ name: 'Markdown', extensions: ['md', 'markdown', 'txt'] }]
+      })
+      if (result.canceled || !result.filePaths[0]) return null
+      const filePath = result.filePaths[0]
+      const content = await readFile(filePath, 'utf-8')
+      return { path: filePath, content }
+    })
+
+    ipcMain.handle('file:open-path', async (_event, filePath: string) => {
+      try {
+        const content = await readFile(filePath, 'utf-8')
+        return { path: filePath, content }
+      } catch {
+        return null
+      }
+    })
+
+    ipcMain.handle('file:save', async (_event, filePath: string | null, content: string) => {
+      let targetPath = filePath
+      if (!targetPath) {
+        const result = await dialog.showSaveDialog(mainWindow!, {
+          filters: [{ name: 'Markdown', extensions: ['md'] }],
+          defaultPath: 'untitled.md'
+        })
+        if (result.canceled || !result.filePath) return { canceled: true as const }
+        targetPath = result.filePath.endsWith('.md') ? result.filePath : `${result.filePath}.md`
+      }
+      await writeFile(targetPath, content, 'utf-8')
+      return { path: targetPath, canceled: false as const }
+    })
+
+    ipcMain.handle('file:save-as', async (_event, content: string, currentPath?: string | null) => {
+      const result = await dialog.showSaveDialog(mainWindow!, {
+        filters: [{ name: 'Markdown', extensions: ['md'] }],
+        defaultPath: currentPath || 'untitled.md'
+      })
+      if (result.canceled || !result.filePath) return { canceled: true as const }
+      const targetPath = result.filePath.endsWith('.md') ? result.filePath : `${result.filePath}.md`
+      await writeFile(targetPath, content, 'utf-8')
+      return { path: targetPath, canceled: false as const }
+    })
+
+    ipcMain.handle('export:pdf', async (_event, html: string, defaultName?: string) => {
+      const result = await dialog.showSaveDialog(mainWindow!, {
+        filters: [{ name: 'PDF', extensions: ['pdf'] }],
+        defaultPath: defaultName?.replace(/\.md$/i, '.pdf') || 'document.pdf'
+      })
+      if (result.canceled || !result.filePath) return { canceled: true as const }
+      const filePath = result.filePath.endsWith('.pdf') ? result.filePath : `${result.filePath}.pdf`
+      await exportHtmlToPdf(html, filePath)
+      return { path: filePath, canceled: false as const }
+    })
+
+    ipcMain.handle('window:minimize', () => mainWindow?.minimize())
+    ipcMain.handle('window:maximize', () => {
+      if (mainWindow?.isMaximized()) mainWindow.unmaximize()
+      else mainWindow?.maximize()
+    })
+    ipcMain.handle('window:close', () => mainWindow?.close())
+    ipcMain.handle('window:force-close', () => {
+      mainWindow?.removeAllListeners('close')
+      mainWindow?.close()
+    })
+    ipcMain.handle('window:is-maximized', () => mainWindow?.isMaximized() ?? false)
+
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    })
+  })
+
+  app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') app.quit()
+  })
+}

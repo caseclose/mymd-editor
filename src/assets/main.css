@@ -1,0 +1,47 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+body {
+  font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Crepe editor fills available space */
+.crepe-editor .milkdown {
+  height: 100%;
+}
+
+.crepe-editor .ProseMirror {
+  outline: none;
+  min-height: 100%;
+}
+
+.crepe-dark .milkdown {
+  --crepe-color-background: #1e1e1e;
+  --crepe-color-on-background: #d4d4d4;
+  --crepe-color-surface: #2d2d2d;
+  --crepe-color-on-surface: #d4d4d4;
+}
+
+/* drag region for frameless window - title bar area */
+.titlebar {
+  -webkit-app-region: drag;
+}
+
+.titlebar button {
+  -webkit-app-region: no-drag;
+}
