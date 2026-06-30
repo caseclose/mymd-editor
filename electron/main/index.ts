@@ -2,7 +2,8 @@ import { app, shell, BrowserWindow, ipcMain, dialog, Menu } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { readFile, writeFile, stat } from 'fs/promises'
-import { exportHtmlToPdf } from './export-pdf'
+import { exportHtmlToPdf, exportHtmlFile, exportHtmlToImage, exportWithPandoc, showPandocNotFoundDialog } from './export'
+import { loadPreferences, savePreferences } from './preferences'
 import {
   readFolderTree,
   saveImageAsset,
@@ -38,7 +39,18 @@ function buildMenu(): void {
         { label: '保存', accelerator: 'CmdOrCtrl+S', click: () => sendMenuAction('save') },
         { label: '另存为...', accelerator: 'CmdOrCtrl+Shift+S', click: () => sendMenuAction('save-as') },
         { type: 'separator' },
-        { label: '导出 PDF...', accelerator: 'CmdOrCtrl+Shift+E', click: () => sendMenuAction('export-pdf') },
+        {
+          label: '导出',
+          submenu: [
+            { label: 'PDF...', accelerator: 'CmdOrCtrl+Shift+E', click: () => sendMenuAction('export-pdf') },
+            { label: 'HTML...', click: () => sendMenuAction('export-html') },
+            { label: 'HTML（无样式）...', click: () => sendMenuAction('export-html-plain') },
+            { label: '图片 PNG...', click: () => sendMenuAction('export-image') },
+            { type: 'separator' },
+            { label: 'Word (.docx)...', click: () => sendMenuAction('export-docx') },
+            { label: 'EPUB...', click: () => sendMenuAction('export-epub') }
+          ]
+        },
         { type: 'separator' },
         { role: 'quit', label: '退出' }
       ]
@@ -65,6 +77,15 @@ function buildMenu(): void {
         { type: 'separator' },
         { label: '切换侧边栏', accelerator: 'CmdOrCtrl+\\', click: () => sendMenuAction('toggle-sidebar') },
         { label: '切换大纲', accelerator: 'CmdOrCtrl+Shift+L', click: () => sendMenuAction('toggle-outline') },
+        { type: 'separator' },
+        { label: '专注模式', accelerator: 'F8', click: () => sendMenuAction('toggle-focus') },
+        { label: '打字机模式', accelerator: 'F9', click: () => sendMenuAction('toggle-typewriter') },
+        { label: '源码模式', accelerator: 'CmdOrCtrl+/', click: () => sendMenuAction('toggle-source') },
+        { type: 'separator' },
+        { label: '导入自定义主题...', click: () => sendMenuAction('import-theme') },
+        { label: '清除自定义主题', click: () => sendMenuAction('clear-theme') },
+        { type: 'separator' },
+        { label: '自动保存', type: 'checkbox', checked: true, click: (item) => sendMenuAction(item.checked ? 'autosave-on' : 'autosave-off') },
         { type: 'separator' },
         { role: 'reload', label: '重新加载' },
         { role: 'toggleDevTools', label: '开发者工具' },
@@ -265,6 +286,68 @@ if (!gotLock) {
       const filePath = result.filePath.endsWith('.pdf') ? result.filePath : `${result.filePath}.pdf`
       await exportHtmlToPdf(html, filePath)
       return { path: filePath, canceled: false as const }
+    })
+
+    ipcMain.handle('export:html', async (_event, html: string, defaultName?: string) => {
+      const result = await dialog.showSaveDialog(mainWindow!, {
+        filters: [{ name: 'HTML', extensions: ['html', 'htm'] }],
+        defaultPath: defaultName?.replace(/\.md$/i, '.html') || 'document.html'
+      })
+      if (result.canceled || !result.filePath) return { canceled: true as const }
+      const filePath = result.filePath.endsWith('.html') ? result.filePath : `${result.filePath}.html`
+      await exportHtmlFile(html, filePath)
+      return { path: filePath, canceled: false as const }
+    })
+
+    ipcMain.handle('export:image', async (_event, html: string, defaultName?: string) => {
+      const result = await dialog.showSaveDialog(mainWindow!, {
+        filters: [{ name: 'PNG Image', extensions: ['png'] }],
+        defaultPath: defaultName?.replace(/\.md$/i, '.png') || 'document.png'
+      })
+      if (result.canceled || !result.filePath) return { canceled: true as const }
+      const filePath = result.filePath.endsWith('.png') ? result.filePath : `${result.filePath}.png`
+      await exportHtmlToImage(html, filePath)
+      return { path: filePath, canceled: false as const }
+    })
+
+    ipcMain.handle('export:pandoc', async (_event, markdown: string, target: 'docx' | 'epub' | 'latex', defaultName?: string) => {
+      const extMap = { docx: 'docx', epub: 'epub', latex: 'tex' } as const
+      const ext = extMap[target]
+      const result = await dialog.showSaveDialog(mainWindow!, {
+        filters: [{ name: target.toUpperCase(), extensions: [ext] }],
+        defaultPath: defaultName?.replace(/\.md$/i, `.${ext}`) || `document.${ext}`
+      })
+      if (result.canceled || !result.filePath) return { canceled: true as const }
+      try {
+        await exportWithPandoc(markdown, result.filePath, target)
+        return { path: result.filePath, canceled: false as const }
+      } catch (err) {
+        if (err instanceof Error && err.message === 'PANDOC_NOT_FOUND') {
+          if (mainWindow) await showPandocNotFoundDialog(mainWindow)
+          return { canceled: true as const, error: 'PANDOC_NOT_FOUND' }
+        }
+        throw err
+      }
+    })
+
+    ipcMain.handle('prefs:get', async () => loadPreferences())
+    ipcMain.handle('prefs:set', async (_event, partial) => savePreferences(partial))
+
+    ipcMain.handle('theme:import', async () => {
+      const result = await dialog.showOpenDialog(mainWindow!, {
+        properties: ['openFile'],
+        filters: [{ name: 'CSS Theme', extensions: ['css'] }]
+      })
+      if (result.canceled || !result.filePaths[0]) return null
+      const cssPath = result.filePaths[0]
+      const css = await readFile(cssPath, 'utf-8')
+      const name = cssPath.split(/[/\\]/).pop() ?? 'custom.css'
+      const prefs = await savePreferences({ customThemeCss: css, customThemeName: name })
+      return prefs
+    })
+
+    ipcMain.handle('theme:clear', async () => {
+      return savePreferences({ customThemeCss: null, customThemeName: null })
     })
 
     ipcMain.handle('window:minimize', () => mainWindow?.minimize())

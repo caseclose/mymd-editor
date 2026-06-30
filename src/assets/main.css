@@ -55,3 +55,23 @@ body {
 .titlebar button {
   -webkit-app-region: no-drag;
 }
+
+/* Focus mode */
+.mymd-focus-mode .ProseMirror > *:not(.mymd-focus-active) {
+  opacity: 0.35;
+  transition: opacity 0.2s ease;
+}
+
+.mymd-focus-mode .ProseMirror > .mymd-focus-active {
+  opacity: 1;
+}
+
+/* Typewriter mode */
+.mymd-typewriter-mode .ProseMirror {
+  padding-top: 40vh;
+  padding-bottom: 40vh;
+}
+
+.mymd-source-editor {
+  tab-size: 2;
+}

@@ -8,9 +8,21 @@ export type MenuAction =
   | 'save'
   | 'save-as'
   | 'export-pdf'
+  | 'export-html'
+  | 'export-html-plain'
+  | 'export-image'
+  | 'export-docx'
+  | 'export-epub'
   | 'toggle-theme'
   | 'toggle-sidebar'
   | 'toggle-outline'
+  | 'toggle-focus'
+  | 'toggle-typewriter'
+  | 'toggle-source'
+  | 'import-theme'
+  | 'clear-theme'
+  | 'autosave-on'
+  | 'autosave-off'
   | 'find'
   | 'replace'
 
@@ -22,6 +34,7 @@ export interface FileOpenResult {
 export interface SaveResult {
   path?: string
   canceled: boolean
+  error?: string
 }
 
 export interface FileTreeNode {
@@ -41,6 +54,13 @@ export interface ImageSaveResult {
   relativePath: string
 }
 
+export interface AppPreferences {
+  autoSave: boolean
+  autoSaveIntervalMs: number
+  customThemeCss: string | null
+  customThemeName: string | null
+}
+
 const api = {
   openFile: (): Promise<FileOpenResult | null> => ipcRenderer.invoke('file:open'),
   openFilePath: (filePath: string): Promise<FileOpenResult | null> =>
@@ -54,6 +74,15 @@ const api = {
     ipcRenderer.invoke('file:save-as', content, currentPath),
   exportPdf: (html: string, defaultName?: string): Promise<SaveResult> =>
     ipcRenderer.invoke('export:pdf', html, defaultName),
+  exportHtml: (html: string, defaultName?: string): Promise<SaveResult> =>
+    ipcRenderer.invoke('export:html', html, defaultName),
+  exportImage: (html: string, defaultName?: string): Promise<SaveResult> =>
+    ipcRenderer.invoke('export:image', html, defaultName),
+  exportPandoc: (
+    markdown: string,
+    target: 'docx' | 'epub' | 'latex',
+    defaultName?: string
+  ): Promise<SaveResult> => ipcRenderer.invoke('export:pandoc', markdown, target, defaultName),
   saveImageBuffer: (
     docPath: string,
     data: ArrayBuffer,
@@ -61,6 +90,11 @@ const api = {
   ): Promise<ImageSaveResult | null> => ipcRenderer.invoke('image:save-buffer', docPath, data, fileName),
   saveImagePath: (docPath: string, sourcePath: string): Promise<ImageSaveResult | null> =>
     ipcRenderer.invoke('image:save-path', docPath, sourcePath),
+  getPreferences: (): Promise<AppPreferences> => ipcRenderer.invoke('prefs:get'),
+  setPreferences: (partial: Partial<AppPreferences>): Promise<AppPreferences> =>
+    ipcRenderer.invoke('prefs:set', partial),
+  importTheme: (): Promise<AppPreferences | null> => ipcRenderer.invoke('theme:import'),
+  clearTheme: (): Promise<AppPreferences> => ipcRenderer.invoke('theme:clear'),
   minimizeWindow: (): Promise<void> => ipcRenderer.invoke('window:minimize'),
   maximizeWindow: (): Promise<void> => ipcRenderer.invoke('window:maximize'),
   closeWindow: (): Promise<void> => ipcRenderer.invoke('window:close'),

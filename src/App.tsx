@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import CrepeEditor, { type CrepeEditorHandle } from './components/Editor/CrepeEditor'
+import SourceEditor from './components/Editor/SourceEditor'
 import TitleBar from './components/TitleBar/TitleBar'
 import StatusBar from './components/StatusBar/StatusBar'
 import FileSidebar from './components/Sidebar/FileSidebar'
@@ -7,7 +8,7 @@ import OutlinePanel from './components/Outline/OutlinePanel'
 import SearchDialog, { type SearchMode } from './components/Search/SearchDialog'
 import { buildExportHtml, getDocumentTitle } from './lib/export-html'
 import { parseOutline, scrollToOutlineItem } from './lib/outline'
-import type { FileTreeNode, Theme } from './types/api'
+import type { AppPreferences, EditorView, FileTreeNode, Theme } from './types/api'
 import './styles/typora-light.css'
 import './styles/typora-dark.css'
 
@@ -15,40 +16,13 @@ const DEFAULT_CONTENT = `# 欢迎使用 MyMD
 
 MyMD 是一款 **Typora 风格** 的 Markdown 编辑器。
 
-## 功能
+## 阶段三功能
 
-- 所见即所得编辑
-- 数学公式与 Mermaid 图表
-- 文件树与大纲面板
-- 查找替换
-- 导出 PDF
-
-### 数学公式
-
-行内公式 $E=mc^2$，块级公式：
-
-$$
-\\int_0^1 x^2 dx = \\frac{1}{3}
-$$
-
-### Mermaid 图表示例
-
-\`\`\`mermaid
-graph TD
-  A[开始] --> B{判断}
-  B -->|是| C[继续]
-  B -->|否| D[结束]
-\`\`\`
-
-## 快捷键
-
-| 操作 | 快捷键 |
-|------|--------|
-| 打开文件夹 | Ctrl+Shift+O |
-| 查找 | Ctrl+F |
-| 替换 | Ctrl+H |
-| 切换侧边栏 | Ctrl+\\\\ |
-| 切换大纲 | Ctrl+Shift+L |
+- 专注模式（F8）与打字机模式（F9）
+- 源码模式（Ctrl+/）
+- 导出 HTML / 图片 / Word（Pandoc）
+- 自定义 CSS 主题
+- 自动保存
 
 > 开始编写你的文档吧！
 `
@@ -76,9 +50,23 @@ export default function App(): React.JSX.Element {
   const [showSidebar, setShowSidebar] = useState(true)
   const [showOutline, setShowOutline] = useState(true)
   const [searchMode, setSearchMode] = useState<SearchMode | null>(null)
-  const isDirty = currentContent !== savedContent
+  const [editorView, setEditorView] = useState<EditorView>('wysiwyg')
+  const [focusMode, setFocusMode] = useState(false)
+  const [typewriterMode, setTypewriterMode] = useState(false)
+  const [prefs, setPrefs] = useState<AppPreferences>({
+    autoSave: true,
+    autoSaveIntervalMs: 30000,
+    customThemeCss: null,
+    customThemeName: null
+  })
 
+  const isDirty = currentContent !== savedContent
   const outlineItems = useMemo(() => parseOutline(currentContent), [currentContent])
+
+  const getMarkdown = useCallback(
+    () => (editorView === 'source' ? currentContent : (editorRef.current?.getMarkdown() ?? currentContent)),
+    [editorView, currentContent]
+  )
 
   const getTitle = useCallback((): string => {
     if (filePath) return filePath.split(/[/\\]/).pop() ?? '未命名'
@@ -90,6 +78,24 @@ export default function App(): React.JSX.Element {
     document.documentElement.classList.toggle('dark', next === 'dark')
     document.body.style.backgroundColor = next === 'dark' ? '#1e1e1e' : '#ffffff'
   }, [])
+
+  const buildExportPayload = useCallback(
+    (styled: boolean) => {
+      const markdown = getMarkdown()
+      const htmlBody = editorRef.current?.getHtml() ?? ''
+      const title = getDocumentTitle(filePath, markdown)
+      return {
+        markdown,
+        html: buildExportHtml(title, htmlBody, {
+          styled,
+          extraCss: prefs.customThemeCss,
+          dark: false
+        }),
+        defaultName: filePath?.split(/[/\\]/).pop() ?? `${title}.md`
+      }
+    },
+    [filePath, getMarkdown, prefs.customThemeCss]
+  )
 
   const refreshFolder = useCallback(async (path: string) => {
     const result = await window.api.listFolder(path)
@@ -107,6 +113,7 @@ export default function App(): React.JSX.Element {
     setFilePath(null)
     setSavedContent('')
     setCurrentContent('')
+    setEditorView('wysiwyg')
     await editorRef.current?.setMarkdown('')
   }, [isDirty])
 
@@ -114,6 +121,7 @@ export default function App(): React.JSX.Element {
     setFilePath(path)
     setSavedContent(content)
     setCurrentContent(content)
+    setEditorView('wysiwyg')
     await editorRef.current?.setMarkdown(content)
   }, [])
 
@@ -149,37 +157,79 @@ export default function App(): React.JSX.Element {
   }, [])
 
   const handleSave = useCallback(async () => {
-    const markdown = editorRef.current?.getMarkdown() ?? currentContent
+    const markdown = getMarkdown()
     const result = await window.api.saveFile(filePath, markdown)
     if (result.canceled) return
     if (result.path) {
       setFilePath(result.path)
       setSavedContent(markdown)
       setCurrentContent(markdown)
+      if (editorView === 'wysiwyg') await editorRef.current?.setMarkdown(markdown)
       if (folderPath) void refreshFolder(folderPath)
     }
-  }, [filePath, currentContent, folderPath, refreshFolder])
+  }, [filePath, getMarkdown, folderPath, refreshFolder, editorView])
 
   const handleSaveAs = useCallback(async () => {
-    const markdown = editorRef.current?.getMarkdown() ?? currentContent
+    const markdown = getMarkdown()
     const result = await window.api.saveFileAs(markdown, filePath)
     if (result.canceled) return
     if (result.path) {
       setFilePath(result.path)
       setSavedContent(markdown)
       setCurrentContent(markdown)
+      if (editorView === 'wysiwyg') await editorRef.current?.setMarkdown(markdown)
       if (folderPath) void refreshFolder(folderPath)
     }
-  }, [filePath, currentContent, folderPath, refreshFolder])
+  }, [filePath, getMarkdown, folderPath, refreshFolder, editorView])
 
   const handleExportPdf = useCallback(async () => {
-    const markdown = editorRef.current?.getMarkdown() ?? currentContent
-    const htmlBody = editorRef.current?.getHtml() ?? ''
-    const title = getDocumentTitle(filePath, markdown)
-    const fullHtml = buildExportHtml(title, htmlBody)
-    const defaultName = filePath?.split(/[/\\]/).pop() ?? `${title}.md`
-    await window.api.exportPdf(fullHtml, defaultName)
-  }, [filePath, currentContent])
+    const { html, defaultName } = buildExportPayload(true)
+    await window.api.exportPdf(html, defaultName)
+  }, [buildExportPayload])
+
+  const handleExportHtml = useCallback(
+    async (styled: boolean) => {
+      const { html, defaultName } = buildExportPayload(styled)
+      await window.api.exportHtml(html, defaultName)
+    },
+    [buildExportPayload]
+  )
+
+  const handleExportImage = useCallback(async () => {
+    const { html, defaultName } = buildExportPayload(true)
+    await window.api.exportImage(html, defaultName)
+  }, [buildExportPayload])
+
+  const handleExportDocx = useCallback(async () => {
+    const { markdown, defaultName } = buildExportPayload(true)
+    await window.api.exportPandoc(markdown, 'docx', defaultName)
+  }, [buildExportPayload])
+
+  const handleExportEpub = useCallback(async () => {
+    const { markdown, defaultName } = buildExportPayload(true)
+    await window.api.exportPandoc(markdown, 'epub', defaultName)
+  }, [buildExportPayload])
+
+  const handleToggleSource = useCallback(async () => {
+    if (editorView === 'wysiwyg') {
+      const md = editorRef.current?.getMarkdown() ?? currentContent
+      setCurrentContent(md)
+      setEditorView('source')
+    } else {
+      setEditorView('wysiwyg')
+      await editorRef.current?.setMarkdown(currentContent)
+    }
+  }, [editorView, currentContent])
+
+  const handleImportTheme = useCallback(async () => {
+    const result = await window.api.importTheme()
+    if (result) setPrefs(result)
+  }, [])
+
+  const handleClearTheme = useCallback(async () => {
+    const result = await window.api.clearTheme()
+    setPrefs(result)
+  }, [])
 
   const handleCloseRequest = useCallback(async () => {
     if (isDirty) {
@@ -191,13 +241,24 @@ export default function App(): React.JSX.Element {
 
   const handleSearchApply = useCallback(async (nextMarkdown: string) => {
     setCurrentContent(nextMarkdown)
-    await editorRef.current?.setMarkdown(nextMarkdown)
-  }, [])
+    if (editorView === 'wysiwyg') await editorRef.current?.setMarkdown(nextMarkdown)
+  }, [editorView])
 
   useEffect(() => {
     applyTheme('light')
     void window.api.isMaximized().then(setIsMaximized)
+    void window.api.getPreferences().then(setPrefs)
+  }, [applyTheme])
 
+  useEffect(() => {
+    if (!prefs.autoSave || !filePath || !isDirty) return
+    const timer = window.setInterval(() => {
+      void handleSave()
+    }, prefs.autoSaveIntervalMs)
+    return () => window.clearInterval(timer)
+  }, [prefs.autoSave, prefs.autoSaveIntervalMs, filePath, isDirty, handleSave])
+
+  useEffect(() => {
     const unsubMenu = window.api.onMenuAction((action) => {
       switch (action) {
         case 'new':
@@ -218,6 +279,21 @@ export default function App(): React.JSX.Element {
         case 'export-pdf':
           void handleExportPdf()
           break
+        case 'export-html':
+          void handleExportHtml(true)
+          break
+        case 'export-html-plain':
+          void handleExportHtml(false)
+          break
+        case 'export-image':
+          void handleExportImage()
+          break
+        case 'export-docx':
+          void handleExportDocx()
+          break
+        case 'export-epub':
+          void handleExportEpub()
+          break
         case 'toggle-theme':
           applyTheme(theme === 'light' ? 'dark' : 'light')
           break
@@ -226,6 +302,27 @@ export default function App(): React.JSX.Element {
           break
         case 'toggle-outline':
           setShowOutline((v) => !v)
+          break
+        case 'toggle-focus':
+          setFocusMode((v) => !v)
+          break
+        case 'toggle-typewriter':
+          setTypewriterMode((v) => !v)
+          break
+        case 'toggle-source':
+          void handleToggleSource()
+          break
+        case 'import-theme':
+          void handleImportTheme()
+          break
+        case 'clear-theme':
+          void handleClearTheme()
+          break
+        case 'autosave-on':
+          void window.api.setPreferences({ autoSave: true }).then(setPrefs)
+          break
+        case 'autosave-off':
+          void window.api.setPreferences({ autoSave: false }).then(setPrefs)
           break
         case 'find':
           setSearchMode('find')
@@ -270,6 +367,13 @@ export default function App(): React.JSX.Element {
     handleSave,
     handleSaveAs,
     handleExportPdf,
+    handleExportHtml,
+    handleExportImage,
+    handleExportDocx,
+    handleExportEpub,
+    handleToggleSource,
+    handleImportTheme,
+    handleClearTheme,
     openPath,
     handleCloseRequest,
     refreshFolder
@@ -313,10 +417,17 @@ export default function App(): React.JSX.Element {
             initialContent={DEFAULT_CONTENT}
             theme={theme}
             filePath={filePath}
+            focusMode={focusMode}
+            typewriterMode={typewriterMode}
+            customThemeCss={prefs.customThemeCss}
+            hidden={editorView === 'source'}
             onChange={setCurrentContent}
           />
+          {editorView === 'source' && (
+            <SourceEditor value={currentContent} theme={theme} onChange={setCurrentContent} />
+          )}
         </div>
-        {showOutline && (
+        {showOutline && editorView === 'wysiwyg' && (
           <OutlinePanel
             items={outlineItems}
             theme={theme}
@@ -330,6 +441,10 @@ export default function App(): React.JSX.Element {
         wordCount={countWords(currentContent)}
         charCount={currentContent.length}
         filePath={filePath}
+        editorView={editorView}
+        focusMode={focusMode}
+        typewriterMode={typewriterMode}
+        autoSave={prefs.autoSave}
       />
     </div>
   )

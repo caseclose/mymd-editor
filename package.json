@@ -1,6 +1,6 @@
 {
   "name": "mymd",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "MyMD - Typora-style Markdown Editor",
   "main": "./out/main/index.js",
   "author": "mymd",

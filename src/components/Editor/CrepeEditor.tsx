@@ -17,6 +17,10 @@ interface CrepeEditorProps {
   initialContent: string
   theme: Theme
   filePath: string | null
+  focusMode: boolean
+  typewriterMode: boolean
+  customThemeCss: string | null
+  hidden?: boolean
   onChange: (markdown: string) => void
 }
 
@@ -26,7 +30,7 @@ function toImageUrl(absolutePath: string): string {
 }
 
 const CrepeEditor = forwardRef<CrepeEditorHandle, CrepeEditorProps>(
-  ({ initialContent, theme, filePath, onChange }, ref) => {
+  ({ initialContent, theme, filePath, focusMode, typewriterMode, customThemeCss, hidden, onChange }, ref) => {
     const containerRef = useRef<HTMLDivElement>(null)
     const crepeRef = useRef<Crepe | null>(null)
     const filePathRef = useRef(filePath)
@@ -124,10 +128,60 @@ const CrepeEditor = forwardRef<CrepeEditorHandle, CrepeEditorProps>(
       }
     }, [theme])
 
+    useEffect(() => {
+      const id = 'mymd-custom-theme-style'
+      let el = document.getElementById(id) as HTMLStyleElement | null
+      if (!customThemeCss) {
+        el?.remove()
+        return
+      }
+      if (!el) {
+        el = document.createElement('style')
+        el.id = id
+        document.head.appendChild(el)
+      }
+      el.textContent = customThemeCss
+    }, [customThemeCss])
+
+    useEffect(() => {
+      if (!focusMode || !containerRef.current) return
+      const root = containerRef.current
+      const updateFocus = (): void => {
+        const pm = root.querySelector('.ProseMirror')
+        if (!pm) return
+        pm.querySelectorAll('.mymd-focus-active').forEach((el) => el.classList.remove('mymd-focus-active'))
+        const sel = window.getSelection()
+        if (!sel?.anchorNode) return
+        let node: Node | null = sel.anchorNode
+        while (node && node !== pm) {
+          if (node instanceof HTMLElement && node.parentElement === pm) {
+            node.classList.add('mymd-focus-active')
+            break
+          }
+          node = node.parentNode
+        }
+      }
+      root.addEventListener('keyup', updateFocus)
+      root.addEventListener('mouseup', updateFocus)
+      return () => {
+        root.removeEventListener('keyup', updateFocus)
+        root.removeEventListener('mouseup', updateFocus)
+        root.querySelectorAll('.mymd-focus-active').forEach((el) => el.classList.remove('mymd-focus-active'))
+      }
+    }, [focusMode])
+
+    const modeClasses = [
+      theme === 'dark' ? 'dark crepe-dark' : '',
+      focusMode ? 'mymd-focus-mode' : '',
+      typewriterMode ? 'mymd-typewriter-mode' : ''
+    ]
+      .filter(Boolean)
+      .join(' ')
+
     return (
       <div
         ref={containerRef}
-        className={`crepe-editor h-full w-full overflow-y-auto ${theme === 'dark' ? 'dark crepe-dark' : ''}`}
+        className={`crepe-editor h-full w-full overflow-y-auto ${modeClasses} ${hidden ? 'hidden' : ''}`}
       />
     )
   }
