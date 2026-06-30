@@ -34,6 +34,7 @@
 | 🖊️ **沉浸式写作** | 专注 / 打字机模式，减少干扰 |
 | 📂 **项目级管理** | 打开文件夹、侧边栏文件树、实时刷新 |
 | 🧭 **结构化导航** | 右侧大纲，一键跳转标题 |
+| 📑 **多标签编辑** | 多文档并行、关闭恢复、浏览器式快捷键 |
 | 📤 **多格式导出** | PDF · HTML · PNG · Word · EPUB |
 | 🎨 **可定制外观** | 亮/暗主题 + 导入自定义 CSS |
 
@@ -58,7 +59,7 @@
 
 **暗色主题**
 
-`Ctrl+Shift+T` 一键切换，夜间更护眼。
+`Ctrl+Alt+T` 一键切换，夜间更护眼。
 
 <img src="docs/screenshots/dark-theme.png" alt="暗色主题" width="100%" />
 
@@ -98,7 +99,7 @@
 
 **状态栏**
 
-字数统计、路径、自动保存与模式指示。
+字数统计、缩放控制、路径、自动保存与模式指示。
 
 <img src="docs/screenshots/status-bar.png" alt="状态栏" width="100%" />
 
@@ -109,6 +110,22 @@
 ### 导航与组织
 
 <table>
+<tr>
+<td width="50%" valign="top">
+
+**多标签页**
+
+`Ctrl+T` 新建标签，`Ctrl+W` 关闭，`Ctrl+Shift+T` 恢复最近关闭的标签。
+
+</td>
+<td width="50%" valign="top">
+
+**崩溃恢复**
+
+自动保存会话快照，异常退出后启动可恢复未保存内容。
+
+</td>
+</tr>
 <tr>
 <td width="50%" valign="top">
 
@@ -231,11 +248,12 @@ PDF / HTML / 无样式 HTML / PNG / Word / EPUB。
 
 | 类别 | 功能 |
 |------|------|
-| 编辑 | GFM 所见即所得、源码模式、撤销/重做 |
-| 写作 | 专注模式 `F8`、打字机模式 `F9`、自动保存（30s） |
+| 编辑 | GFM 所见即所得、源码模式、撤销/重做、编辑器缩放 |
+| 标签 | 多标签页、关闭恢复（`Ctrl+Shift+T`）、`Ctrl+1`–`9` 切换 |
+| 写作 | 专注模式 `F8`、打字机模式 `F9`、自动保存（30s）、崩溃恢复 |
 | 导航 | 文件树、大纲、查找/替换 |
-| 富内容 | KaTeX、Mermaid、代码高亮、图片上传 |
-| 外观 | 亮/暗主题、自定义 CSS 主题 |
+| 富内容 | KaTeX、Mermaid、代码高亮、图片相对路径 |
+| 外观 | 亮/暗主题、自定义 CSS 主题、MyMD 品牌图标 |
 | 导出 | PDF、HTML、PNG、Word（Pandoc）、EPUB（Pandoc） |
 | 系统 | 无边框窗口、`.md` 文件关联、单实例打开 |
 
@@ -250,6 +268,8 @@ git clone https://github.com/caseclose/mymd-editor.git
 cd mymd-editor
 npm install
 npm run dev
+# 若 dev 异常或白屏，可先清理进程：
+npm run dev:clean
 ```
 
 ### 构建安装包
@@ -269,6 +289,8 @@ npm test
 
 ## 快捷键
 
+### 文件
+
 | 操作 | 快捷键 |
 |------|--------|
 | 新建 | `Ctrl+N` |
@@ -277,14 +299,33 @@ npm test
 | 保存 | `Ctrl+S` |
 | 另存为 | `Ctrl+Shift+S` |
 | 导出 PDF | `Ctrl+Shift+E` |
-| 切换主题 | `Ctrl+Shift+T` |
+
+### 标签页
+
+| 操作 | 快捷键 |
+|------|--------|
+| 新建标签页 | `Ctrl+T` |
+| 关闭标签页 | `Ctrl+W` |
+| 关闭窗口 | `Ctrl+Shift+W` |
+| 恢复已关闭标签 | `Ctrl+Shift+T` |
+| 下一个 / 上一个标签 | `Ctrl+Tab` / `Ctrl+Shift+Tab` |
+| 按序号切换标签 | `Ctrl+1` … `Ctrl+9` |
+
+### 视图与编辑
+
+| 操作 | 快捷键 |
+|------|--------|
+| 切换主题 | `Ctrl+Alt+T` |
 | 切换侧边栏 | `Ctrl+\` |
 | 切换大纲 | `Ctrl+Shift+L` |
+| 放大 / 缩小 / 重置缩放 | `Ctrl+=` / `Ctrl+-` / `Ctrl+0` |
 | 专注模式 | `F8` |
 | 打字机模式 | `F9` |
 | 源码模式 | `Ctrl+/` |
 | 查找 | `Ctrl+F` |
 | 替换 | `Ctrl+H` |
+
+> 按住 `Ctrl` 并滚动鼠标滚轮也可缩放编辑区。
 
 ---
 
