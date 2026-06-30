@@ -4,30 +4,17 @@
 
 **Typora 风格的 Windows Markdown 编辑器**
 
-<br />
-
-<img src="https://img.shields.io/badge/设计_&_开发-FengWang-24292e?style=for-the-badge&logo=aboutdotme&logoColor=white" alt="Author" />
-
-<br /><br />
-
-[![Gmail](https://img.shields.io/badge/Gmail-fengw2002%40gmail.com-EA4335?style=for-the-badge&logo=gmail&logoColor=white)](mailto:fengw2002@gmail.com)&nbsp;
-[![PKU Mail](https://img.shields.io/badge/北大邮箱-fengwang%40stu.pku.edu.cn-94070A?style=for-the-badge&logo=minutemailer&logoColor=white)](mailto:fengwang@stu.pku.edu.cn)
-
-<br /><br />
-
 <sub>面向个人写作与效率提升 · 开源项目，欢迎交流与自用</sub>
 
-<br />
+<img src="https://img.shields.io/badge/设计_&_开发-FengWang-24292e?style=flat-square&logo=aboutdotme&logoColor=white" alt="Author" />
+[![Gmail](https://img.shields.io/badge/Gmail-fengw2002%40gmail.com-EA4335?style=flat-square&logo=gmail&logoColor=white)](mailto:fengw2002@gmail.com)
+[![PKU Mail](https://img.shields.io/badge/北大邮箱-fengwang%40stu.pku.edu.cn-94070A?style=flat-square&logo=minutemailer&logoColor=white)](mailto:fengwang@stu.pku.edu.cn)
 
 所见即所得 · 专注写作 · 丰富导出
-
-<br />
 
 ![主界面](docs/screenshots/main-editor-light.png)
 
 <sub>三栏布局：文件树 · 编辑区 · 大纲</sub>
-
-<br />
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
 ![Electron](https://img.shields.io/badge/Electron-37-47848F?logo=electron&logoColor=white)
