@@ -303,3 +303,15 @@ Electron 37  +  electron-vite  +  React 19  +  TypeScript
 ## 许可证
 
 MIT
+
+---
+
+<div align="center">
+
+<br />
+
+**MyMD** 由 **FengWang** 设计并开发（[fengw2002@gmail.com](mailto:fengw2002@gmail.com) / [fengwang@stu.pku.edu.cn](mailto:fengwang@stu.pku.edu.cn)）
+
+<sub>面向个人写作与效率提升 · 开源项目，欢迎交流与自用</sub>
+
+</div>
