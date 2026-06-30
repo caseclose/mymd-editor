@@ -1,5 +1,7 @@
 import type { EditorView } from './api'
 
+export type ClosedTabSnapshot = Omit<EditorTab, 'id'>
+
 export interface EditorTab {
   id: string
   filePath: string | null

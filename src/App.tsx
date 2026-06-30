@@ -20,7 +20,7 @@ import {
   editorZoomFactor,
   stepEditorZoom
 } from './lib/editor-zoom'
-import { createTab, tabIsDirty, tabTitle, type EditorTab } from './types/tab'
+import { createTab, tabIsDirty, tabTitle, type ClosedTabSnapshot, type EditorTab } from './types/tab'
 import type { AppPreferences, FileTreeNode, RecoverySnapshot, Theme, UnsavedDialogOptions } from './types/api'
 import './styles/typora-light.css'
 import './styles/typora-dark.css'
@@ -57,6 +57,8 @@ export default function App(): React.JSX.Element {
   const tabsRef = useRef<EditorTab[]>([])
   const activeTabIdRef = useRef('')
   const getMarkdownRef = useRef(() => '')
+  const closedTabsRef = useRef<ClosedTabSnapshot[]>([])
+  const MAX_CLOSED_TABS = 20
 
   const initialTab = useMemo(
     () => createTab({ content: DEFAULT_CONTENT, savedContent: DEFAULT_CONTENT }),
@@ -445,12 +447,20 @@ export default function App(): React.JSX.Element {
     setPrefs(result)
   }, [])
 
+  const rememberClosedTab = useCallback((snapshot: ClosedTabSnapshot) => {
+    closedTabsRef.current = [snapshot, ...closedTabsRef.current].slice(0, MAX_CLOSED_TABS)
+  }, [])
+
   const handleCloseTab = useCallback(
     async (tabId: string) => {
       const tab = tabs.find((t) => t.id === tabId)
       if (!tab) return
       const content =
         tabId === activeTabId ? flushActiveTabContent() : tab.content
+      const view = tabId === activeTabId ? editorView : tab.editorView
+      let snapshotContent = content
+      let snapshotSaved = tab.savedContent
+
       if (tabIsDirty({ ...tab, content })) {
         const action = await window.api.showUnsavedDialog(
           unsavedDialogOptions([{ ...tab, content }])
@@ -459,8 +469,21 @@ export default function App(): React.JSX.Element {
         if (action === 'save') {
           const ok = await saveTab(tabId, content)
           if (!ok) return
+          snapshotContent = content
+          snapshotSaved = content
+        } else {
+          snapshotContent = tab.savedContent
+          snapshotSaved = tab.savedContent
         }
       }
+
+      rememberClosedTab({
+        filePath: tab.filePath,
+        content: snapshotContent,
+        savedContent: snapshotSaved,
+        editorView: view
+      })
+
       const remaining = tabs.filter((t) => t.id !== tabId)
       if (remaining.length === 0) {
         const newTab = createTab({ content: '', savedContent: '' })
@@ -471,7 +494,15 @@ export default function App(): React.JSX.Element {
         if (activeTabId === tabId) setActiveTabId(remaining[0].id)
       }
     },
-    [tabs, activeTabId, flushActiveTabContent, saveTab, unsavedDialogOptions]
+    [
+      tabs,
+      activeTabId,
+      editorView,
+      flushActiveTabContent,
+      saveTab,
+      unsavedDialogOptions,
+      rememberClosedTab
+    ]
   )
 
   const handleNewTab = useCallback(() => {
@@ -480,6 +511,26 @@ export default function App(): React.JSX.Element {
     setTabs((prev) => [...prev, tab])
     setActiveTabId(tab.id)
   }, [flushActiveTabContent])
+
+  const handleReopenClosedTab = useCallback(() => {
+    const closed = closedTabsRef.current.shift()
+    if (!closed) return
+    flushActiveTabContent()
+    const tab = createTab(closed)
+    setTabs((prev) => [...prev, tab])
+    setActiveTabId(tab.id)
+  }, [flushActiveTabContent])
+
+  const switchToAdjacentTab = useCallback(
+    (delta: number) => {
+      if (tabs.length <= 1) return
+      const index = tabs.findIndex((t) => t.id === activeTabId)
+      if (index < 0) return
+      const next = tabs[(index + delta + tabs.length) % tabs.length]
+      void switchTab(next.id)
+    },
+    [tabs, activeTabId, switchTab]
+  )
 
   const handleCloseRequest = useCallback(async () => {
     const md = flushActiveTabContent()
@@ -625,21 +676,94 @@ export default function App(): React.JSX.Element {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (!event.ctrlKey && !event.metaKey) return
+      const mod = event.ctrlKey || event.metaKey
+      if (!mod) return
+
       if (event.key === '=' || event.key === '+') {
         event.preventDefault()
         zoomIn()
-      } else if (event.key === '-') {
+        return
+      }
+      if (event.key === '-') {
         event.preventDefault()
         zoomOut()
-      } else if (event.key === '0') {
+        return
+      }
+      if (event.key === '0') {
         event.preventDefault()
         zoomReset()
+        return
+      }
+
+      if (event.key === 't' && event.altKey && !event.shiftKey) {
+        event.preventDefault()
+        applyTheme(theme === 'light' ? 'dark' : 'light')
+        return
+      }
+
+      if (event.altKey) return
+
+      if (event.key === 't' && event.shiftKey) {
+        event.preventDefault()
+        handleReopenClosedTab()
+        return
+      }
+      if (event.key === 't' && !event.shiftKey) {
+        event.preventDefault()
+        handleNewTab()
+        return
+      }
+      if (event.key === 'w' && !event.shiftKey) {
+        event.preventDefault()
+        void handleCloseTab(activeTabId)
+        return
+      }
+      if (event.key === 'w' && event.shiftKey) {
+        event.preventDefault()
+        void handleCloseRequest()
+        return
+      }
+      if (event.key === 'Tab') {
+        event.preventDefault()
+        switchToAdjacentTab(event.shiftKey ? -1 : 1)
+        return
+      }
+      if (event.key === 'PageDown') {
+        event.preventDefault()
+        switchToAdjacentTab(1)
+        return
+      }
+      if (event.key === 'PageUp') {
+        event.preventDefault()
+        switchToAdjacentTab(-1)
+        return
+      }
+      const tabNumber = Number(event.key)
+      if (!event.shiftKey && tabNumber >= 1 && tabNumber <= 9) {
+        const target = tabs[tabNumber - 1]
+        if (target) {
+          event.preventDefault()
+          void switchTab(target.id)
+        }
       }
     }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [zoomIn, zoomOut, zoomReset])
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => window.removeEventListener('keydown', onKeyDown, true)
+  }, [
+    zoomIn,
+    zoomOut,
+    zoomReset,
+    handleNewTab,
+    handleReopenClosedTab,
+    handleCloseTab,
+    handleCloseRequest,
+    activeTabId,
+    applyTheme,
+    theme,
+    switchToAdjacentTab,
+    switchTab,
+    tabs
+  ])
 
   useEffect(() => {
     if (!bootstrapped || !hasApi()) return
@@ -746,6 +870,18 @@ export default function App(): React.JSX.Element {
         case 'zoom-reset':
           zoomReset()
           break
+        case 'new-tab':
+          handleNewTab()
+          break
+        case 'close-tab':
+          void handleCloseTab(activeTabId)
+          break
+        case 'close-window':
+          void handleCloseRequest()
+          break
+        case 'reopen-tab':
+          handleReopenClosedTab()
+          break
       }
     })
 
@@ -798,6 +934,10 @@ export default function App(): React.JSX.Element {
     zoomIn,
     zoomOut,
     zoomReset,
+    handleNewTab,
+    handleReopenClosedTab,
+    handleCloseTab,
+    activeTabId,
     bootstrapped
   ])
 

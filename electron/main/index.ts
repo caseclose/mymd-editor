@@ -50,6 +50,11 @@ function buildMenu(autoSaveChecked = true): void {
         { label: '保存', accelerator: 'CmdOrCtrl+S', click: () => sendMenuAction('save') },
         { label: '另存为...', accelerator: 'CmdOrCtrl+Shift+S', click: () => sendMenuAction('save-as') },
         { type: 'separator' },
+        { label: '新建标签页', accelerator: 'CmdOrCtrl+T', click: () => sendMenuAction('new-tab') },
+        { label: '关闭标签页', accelerator: 'CmdOrCtrl+W', click: () => sendMenuAction('close-tab') },
+        { label: '关闭窗口', accelerator: 'CmdOrCtrl+Shift+W', click: () => sendMenuAction('close-window') },
+        { label: '重新打开已关闭的标签页', accelerator: 'CmdOrCtrl+Shift+T', click: () => sendMenuAction('reopen-tab') },
+        { type: 'separator' },
         {
           label: '导出',
           submenu: [
@@ -84,7 +89,7 @@ function buildMenu(autoSaveChecked = true): void {
     {
       label: '视图',
       submenu: [
-        { label: '切换主题', accelerator: 'CmdOrCtrl+Shift+T', click: () => sendMenuAction('toggle-theme') },
+        { label: '切换主题', accelerator: 'CmdOrCtrl+Alt+T', click: () => sendMenuAction('toggle-theme') },
         { type: 'separator' },
         { label: '切换侧边栏', accelerator: 'CmdOrCtrl+\\', click: () => sendMenuAction('toggle-sidebar') },
         { label: '切换大纲', accelerator: 'CmdOrCtrl+Shift+L', click: () => sendMenuAction('toggle-outline') },

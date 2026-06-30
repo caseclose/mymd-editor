@@ -28,6 +28,10 @@ export type MenuAction =
   | 'zoom-in'
   | 'zoom-out'
   | 'zoom-reset'
+  | 'new-tab'
+  | 'close-tab'
+  | 'close-window'
+  | 'reopen-tab'
 
 export interface FileOpenResult {
   path: string
