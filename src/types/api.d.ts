@@ -12,12 +12,43 @@ export interface SaveResult {
   canceled: boolean
 }
 
+export interface FileTreeNode {
+  name: string
+  path: string
+  isDirectory: boolean
+  children?: FileTreeNode[]
+}
+
+export interface FolderOpenResult {
+  folderPath: string
+  tree: FileTreeNode[]
+}
+
+export interface ImageSaveResult {
+  absolutePath: string
+  relativePath: string
+}
+
+export interface OutlineItem {
+  level: number
+  text: string
+  line: number
+}
+
 export interface MyMDApi {
   openFile: () => Promise<FileOpenResult | null>
   openFilePath: (filePath: string) => Promise<FileOpenResult | null>
+  openFolder: () => Promise<FolderOpenResult | null>
+  listFolder: (folderPath: string) => Promise<FolderOpenResult | null>
   saveFile: (path: string | null, content: string) => Promise<SaveResult>
   saveFileAs: (content: string, currentPath?: string | null) => Promise<SaveResult>
   exportPdf: (html: string, defaultName?: string) => Promise<SaveResult>
+  saveImageBuffer: (
+    docPath: string,
+    data: ArrayBuffer,
+    fileName: string
+  ) => Promise<ImageSaveResult | null>
+  saveImagePath: (docPath: string, sourcePath: string) => Promise<ImageSaveResult | null>
   minimizeWindow: () => Promise<void>
   maximizeWindow: () => Promise<void>
   closeWindow: () => Promise<void>
@@ -27,6 +58,8 @@ export interface MyMDApi {
   onMenuAction: (callback: (action: MenuAction) => void) => () => void
   onOpenFilePath: (callback: (filePath: string) => void) => () => void
   onWindowCloseRequest: (callback: () => void) => () => void
+  onFolderChanged: (callback: (folderPath: string) => void) => () => void
+  onFolderOpened: (callback: (result: FolderOpenResult) => void) => () => void
 }
 
 declare global {

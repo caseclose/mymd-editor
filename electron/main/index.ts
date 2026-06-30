@@ -1,11 +1,20 @@
 import { app, shell, BrowserWindow, ipcMain, dialog, Menu } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
-import { readFile, writeFile } from 'fs/promises'
+import { readFile, writeFile, stat } from 'fs/promises'
 import { exportHtmlToPdf } from './export-pdf'
+import {
+  readFolderTree,
+  saveImageAsset,
+  saveImageFromPath,
+  isImageFile,
+  type FileTreeNode
+} from './fs-utils'
+import { watchFolder, stopWatching } from './folder-watcher'
 
 let mainWindow: BrowserWindow | null = null
 let pendingOpenPath: string | null = null
+let pendingOpenFolder: string | null = null
 
 function getArgvPath(): string | null {
   const args = process.argv.slice(app.isPackaged ? 1 : 2)
@@ -25,6 +34,7 @@ function buildMenu(): void {
       submenu: [
         { label: '新建', accelerator: 'CmdOrCtrl+N', click: () => sendMenuAction('new') },
         { label: '打开...', accelerator: 'CmdOrCtrl+O', click: () => sendMenuAction('open') },
+        { label: '打开文件夹...', accelerator: 'CmdOrCtrl+Shift+O', click: () => sendMenuAction('open-folder') },
         { label: '保存', accelerator: 'CmdOrCtrl+S', click: () => sendMenuAction('save') },
         { label: '另存为...', accelerator: 'CmdOrCtrl+Shift+S', click: () => sendMenuAction('save-as') },
         { type: 'separator' },
@@ -42,13 +52,19 @@ function buildMenu(): void {
         { role: 'cut', label: '剪切' },
         { role: 'copy', label: '复制' },
         { role: 'paste', label: '粘贴' },
-        { role: 'selectAll', label: '全选' }
+        { role: 'selectAll', label: '全选' },
+        { type: 'separator' },
+        { label: '查找', accelerator: 'CmdOrCtrl+F', click: () => sendMenuAction('find') },
+        { label: '替换', accelerator: 'CmdOrCtrl+H', click: () => sendMenuAction('replace') }
       ]
     },
     {
       label: '视图',
       submenu: [
         { label: '切换主题', accelerator: 'CmdOrCtrl+Shift+T', click: () => sendMenuAction('toggle-theme') },
+        { type: 'separator' },
+        { label: '切换侧边栏', accelerator: 'CmdOrCtrl+\\', click: () => sendMenuAction('toggle-sidebar') },
+        { label: '切换大纲', accelerator: 'CmdOrCtrl+Shift+L', click: () => sendMenuAction('toggle-outline') },
         { type: 'separator' },
         { role: 'reload', label: '重新加载' },
         { role: 'toggleDevTools', label: '开发者工具' },
@@ -103,6 +119,14 @@ function createWindow(): void {
       mainWindow?.webContents.send('open-file-path', pendingOpenPath)
       pendingOpenPath = null
     }
+    if (pendingOpenFolder) {
+      void (async () => {
+        const tree = await readFolderTree(pendingOpenFolder!)
+        mainWindow?.webContents.send('folder-opened', { folderPath: pendingOpenFolder, tree })
+        if (mainWindow) watchFolder(pendingOpenFolder!, mainWindow)
+        pendingOpenFolder = null
+      })()
+    }
   })
 
   mainWindow.on('close', (event) => {
@@ -142,6 +166,16 @@ if (!gotLock) {
     app.on('browser-window-created', (_, window) => optimizer.watchWindowShortcuts(window))
 
     pendingOpenPath = getArgvPath()
+    if (pendingOpenPath) {
+      void stat(pendingOpenPath)
+        .then((info) => {
+          if (info.isDirectory()) {
+            pendingOpenFolder = pendingOpenPath
+            pendingOpenPath = null
+          }
+        })
+        .catch(() => undefined)
+    }
     buildMenu()
     createWindow()
 
@@ -158,11 +192,43 @@ if (!gotLock) {
 
     ipcMain.handle('file:open-path', async (_event, filePath: string) => {
       try {
+        const info = await stat(filePath)
+        if (info.isDirectory()) return null
         const content = await readFile(filePath, 'utf-8')
         return { path: filePath, content }
       } catch {
         return null
       }
+    })
+
+    ipcMain.handle('folder:open', async () => {
+      const result = await dialog.showOpenDialog(mainWindow!, {
+        properties: ['openDirectory']
+      })
+      if (result.canceled || !result.filePaths[0]) return null
+      const folderPath = result.filePaths[0].replace(/[/\\]+$/, '')
+      const tree = await readFolderTree(folderPath)
+      if (mainWindow) watchFolder(folderPath, mainWindow)
+      return { folderPath, tree }
+    })
+
+    ipcMain.handle('folder:list', async (_event, folderPath: string) => {
+      try {
+        const tree = await readFolderTree(folderPath)
+        return { folderPath, tree } as { folderPath: string; tree: FileTreeNode[] }
+      } catch {
+        return null
+      }
+    })
+
+    ipcMain.handle('image:save-buffer', async (_event, docPath: string, data: ArrayBuffer, fileName: string) => {
+      if (!docPath) return null
+      return saveImageAsset(docPath, data, fileName)
+    })
+
+    ipcMain.handle('image:save-path', async (_event, docPath: string, sourcePath: string) => {
+      if (!docPath || !isImageFile(sourcePath)) return null
+      return saveImageFromPath(docPath, sourcePath)
     })
 
     ipcMain.handle('file:save', async (_event, filePath: string | null, content: string) => {
@@ -208,6 +274,7 @@ if (!gotLock) {
     })
     ipcMain.handle('window:close', () => mainWindow?.close())
     ipcMain.handle('window:force-close', () => {
+      stopWatching()
       mainWindow?.removeAllListeners('close')
       mainWindow?.close()
     })
