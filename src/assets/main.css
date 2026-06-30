@@ -75,3 +75,34 @@ body {
 .mymd-source-editor {
   tab-size: 2;
 }
+
+/* Crepe list: bullet marker vs text alignment */
+.mymd-content .milkdown-list-item-block li .children p,
+.crepe-editor .milkdown-list-item-block li .children p {
+  margin: 0;
+}
+
+.mymd-content .milkdown-list-item-block li .label-wrapper,
+.crepe-editor .milkdown-list-item-block li .label-wrapper {
+  height: auto;
+  align-items: flex-start;
+  align-self: flex-start;
+}
+
+.mymd-content .milkdown-list-item-block li .label-wrapper .label,
+.crepe-editor .milkdown-list-item-block li .label-wrapper .label {
+  height: auto;
+  padding: 0;
+  line-height: 1.75;
+}
+
+.mymd-content .milkdown-list-item-block > .list-item,
+.crepe-editor .milkdown-list-item-block > .list-item {
+  align-items: flex-start;
+}
+
+/* Native ProseMirror lists (fallback) */
+.mymd-content li > p,
+.crepe-editor .ProseMirror li > p {
+  margin: 0;
+}

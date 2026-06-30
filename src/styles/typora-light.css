@@ -46,7 +46,11 @@
   margin: 0.8em 0;
 }
 
-.mymd-content li { margin: 0.25em 0; }
+.mymd-content li { margin: 0.35em 0; }
+
+.mymd-content li > p {
+  margin: 0;
+}
 
 .mymd-content code {
   font-family: "Cascadia Code", "Fira Code", Consolas, monospace;
