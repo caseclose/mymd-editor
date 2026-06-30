@@ -8,6 +8,7 @@ import OutlinePanel from './components/Outline/OutlinePanel'
 import SearchDialog, { type SearchMode } from './components/Search/SearchDialog'
 import { buildExportHtml, getDocumentTitle } from './lib/export-html'
 import { parseOutline, scrollToOutlineItem } from './lib/outline'
+import { notifyError, formatErrorMessage } from './lib/errors'
 import type { AppPreferences, EditorView, FileTreeNode, Theme } from './types/api'
 import './styles/typora-light.css'
 import './styles/typora-dark.css'
@@ -80,21 +81,25 @@ export default function App(): React.JSX.Element {
   }, [])
 
   const buildExportPayload = useCallback(
-    (styled: boolean) => {
+    async (styled: boolean) => {
       const markdown = getMarkdown()
-      const htmlBody = editorRef.current?.getHtml() ?? ''
+      const htmlBody =
+        editorView === 'source'
+          ? await editorRef.current?.renderHtml(markdown)
+          : editorRef.current?.getHtml()
       const title = getDocumentTitle(filePath, markdown)
       return {
         markdown,
-        html: buildExportHtml(title, htmlBody, {
+        html: buildExportHtml(title, htmlBody ?? '', {
           styled,
           extraCss: prefs.customThemeCss,
           dark: false
         }),
-        defaultName: filePath?.split(/[/\\]/).pop() ?? `${title}.md`
+        defaultName: filePath?.split(/[/\\]/).pop() ?? `${title}.md`,
+        docPath: filePath
       }
     },
-    [filePath, getMarkdown, prefs.customThemeCss]
+    [editorView, filePath, getMarkdown, prefs.customThemeCss]
   )
 
   const refreshFolder = useCallback(async (path: string) => {
@@ -156,58 +161,109 @@ export default function App(): React.JSX.Element {
     setShowSidebar(true)
   }, [])
 
-  const handleSave = useCallback(async () => {
-    const markdown = getMarkdown()
-    const result = await window.api.saveFile(filePath, markdown)
-    if (result.canceled) return
-    if (result.path) {
-      setFilePath(result.path)
-      setSavedContent(markdown)
-      setCurrentContent(markdown)
-      if (editorView === 'wysiwyg') await editorRef.current?.setMarkdown(markdown)
-      if (folderPath) void refreshFolder(folderPath)
+  const handleSave = useCallback(async (options?: { silent?: boolean }) => {
+    const snapshot = getMarkdown()
+    try {
+      const result = await window.api.saveFile(filePath, snapshot)
+      if (result.canceled) return
+      if (result.error) {
+        notifyError(`保存失败：${result.error}`, options?.silent)
+        return
+      }
+      if (result.path) {
+        setFilePath(result.path)
+        const latest = getMarkdown()
+        if (latest === snapshot) {
+          setSavedContent(snapshot)
+          setCurrentContent(snapshot)
+          if (editorView === 'wysiwyg') await editorRef.current?.setMarkdown(snapshot)
+        }
+        if (folderPath) void refreshFolder(folderPath)
+      }
+    } catch (error) {
+      notifyError(`保存失败：${formatErrorMessage(error)}`, options?.silent)
     }
   }, [filePath, getMarkdown, folderPath, refreshFolder, editorView])
 
   const handleSaveAs = useCallback(async () => {
-    const markdown = getMarkdown()
-    const result = await window.api.saveFileAs(markdown, filePath)
-    if (result.canceled) return
-    if (result.path) {
-      setFilePath(result.path)
-      setSavedContent(markdown)
-      setCurrentContent(markdown)
-      if (editorView === 'wysiwyg') await editorRef.current?.setMarkdown(markdown)
-      if (folderPath) void refreshFolder(folderPath)
+    const snapshot = getMarkdown()
+    try {
+      const result = await window.api.saveFileAs(snapshot, filePath)
+      if (result.canceled) return
+      if (result.error) {
+        notifyError(`另存为失败：${result.error}`)
+        return
+      }
+      if (result.path) {
+        setFilePath(result.path)
+        const latest = getMarkdown()
+        if (latest === snapshot) {
+          setSavedContent(snapshot)
+          setCurrentContent(snapshot)
+          if (editorView === 'wysiwyg') await editorRef.current?.setMarkdown(snapshot)
+        }
+        if (folderPath) void refreshFolder(folderPath)
+      }
+    } catch (error) {
+      notifyError(`另存为失败：${formatErrorMessage(error)}`)
     }
   }, [filePath, getMarkdown, folderPath, refreshFolder, editorView])
 
   const handleExportPdf = useCallback(async () => {
-    const { html, defaultName } = buildExportPayload(true)
-    await window.api.exportPdf(html, defaultName)
+    try {
+      const { html, defaultName, docPath } = await buildExportPayload(true)
+      const result = await window.api.exportPdf(html, defaultName, docPath)
+      if (result.error) notifyError(`导出 PDF 失败：${result.error}`)
+    } catch (error) {
+      notifyError(`导出 PDF 失败：${formatErrorMessage(error)}`)
+    }
   }, [buildExportPayload])
 
   const handleExportHtml = useCallback(
     async (styled: boolean) => {
-      const { html, defaultName } = buildExportPayload(styled)
-      await window.api.exportHtml(html, defaultName)
+      try {
+        const { html, defaultName, docPath } = await buildExportPayload(styled)
+        const result = await window.api.exportHtml(html, defaultName, docPath)
+        if (result.error) notifyError(`导出 HTML 失败：${result.error}`)
+      } catch (error) {
+        notifyError(`导出 HTML 失败：${formatErrorMessage(error)}`)
+      }
     },
     [buildExportPayload]
   )
 
   const handleExportImage = useCallback(async () => {
-    const { html, defaultName } = buildExportPayload(true)
-    await window.api.exportImage(html, defaultName)
+    try {
+      const { html, defaultName, docPath } = await buildExportPayload(true)
+      const result = await window.api.exportImage(html, defaultName, docPath)
+      if (result.error) notifyError(`导出图片失败：${result.error}`)
+    } catch (error) {
+      notifyError(`导出图片失败：${formatErrorMessage(error)}`)
+    }
   }, [buildExportPayload])
 
   const handleExportDocx = useCallback(async () => {
-    const { markdown, defaultName } = buildExportPayload(true)
-    await window.api.exportPandoc(markdown, 'docx', defaultName)
+    try {
+      const { markdown, defaultName } = await buildExportPayload(true)
+      const result = await window.api.exportPandoc(markdown, 'docx', defaultName)
+      if (result.error && result.error !== 'PANDOC_NOT_FOUND') {
+        notifyError(`导出 Word 失败：${result.error}`)
+      }
+    } catch (error) {
+      notifyError(`导出 Word 失败：${formatErrorMessage(error)}`)
+    }
   }, [buildExportPayload])
 
   const handleExportEpub = useCallback(async () => {
-    const { markdown, defaultName } = buildExportPayload(true)
-    await window.api.exportPandoc(markdown, 'epub', defaultName)
+    try {
+      const { markdown, defaultName } = await buildExportPayload(true)
+      const result = await window.api.exportPandoc(markdown, 'epub', defaultName)
+      if (result.error && result.error !== 'PANDOC_NOT_FOUND') {
+        notifyError(`导出 EPUB 失败：${result.error}`)
+      }
+    } catch (error) {
+      notifyError(`导出 EPUB 失败：${formatErrorMessage(error)}`)
+    }
   }, [buildExportPayload])
 
   const handleToggleSource = useCallback(async () => {
@@ -239,6 +295,13 @@ export default function App(): React.JSX.Element {
     await window.api.forceCloseWindow()
   }, [isDirty])
 
+  const handleEditorChange = useCallback(
+    (markdown: string) => {
+      if (editorView === 'wysiwyg') setCurrentContent(markdown)
+    },
+    [editorView]
+  )
+
   const handleSearchApply = useCallback(async (nextMarkdown: string) => {
     setCurrentContent(nextMarkdown)
     if (editorView === 'wysiwyg') await editorRef.current?.setMarkdown(nextMarkdown)
@@ -250,13 +313,16 @@ export default function App(): React.JSX.Element {
     void window.api.getPreferences().then(setPrefs)
   }, [applyTheme])
 
+  const handleSaveRef = useRef(handleSave)
+  handleSaveRef.current = handleSave
+
   useEffect(() => {
     if (!prefs.autoSave || !filePath || !isDirty) return
     const timer = window.setInterval(() => {
-      void handleSave()
+      void handleSaveRef.current({ silent: true })
     }, prefs.autoSaveIntervalMs)
     return () => window.clearInterval(timer)
-  }, [prefs.autoSave, prefs.autoSaveIntervalMs, filePath, isDirty, handleSave])
+  }, [prefs.autoSave, prefs.autoSaveIntervalMs, filePath, isDirty])
 
   useEffect(() => {
     const unsubMenu = window.api.onMenuAction((action) => {
@@ -421,7 +487,7 @@ export default function App(): React.JSX.Element {
             typewriterMode={typewriterMode}
             customThemeCss={prefs.customThemeCss}
             hidden={editorView === 'source'}
-            onChange={setCurrentContent}
+            onChange={handleEditorChange}
           />
           {editorView === 'source' && (
             <SourceEditor value={currentContent} theme={theme} onChange={setCurrentContent} />

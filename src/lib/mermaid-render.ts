@@ -9,7 +9,7 @@ export async function renderMermaidDiagrams(
   mermaid.initialize({
     startOnLoad: false,
     theme: theme === 'dark' ? 'dark' : 'default',
-    securityLevel: 'loose'
+    securityLevel: 'strict'
   })
 
   if (!initialized) {
@@ -28,6 +28,7 @@ export async function renderMermaidDiagrams(
     const source = codeEl.textContent?.trim()
     if (!source) continue
 
+    pre.dataset.mermaidRendered = 'true'
     const id = `mmd-${Date.now()}-${i}`
     try {
       const { svg } = await mermaid.render(id, source)
@@ -36,7 +37,7 @@ export async function renderMermaidDiagrams(
       wrapper.innerHTML = svg
       pre.replaceWith(wrapper)
     } catch {
-      // keep source block on parse errors
+      delete pre.dataset.mermaidRendered
     }
   }
 }

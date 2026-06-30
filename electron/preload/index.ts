@@ -72,12 +72,12 @@ const api = {
     ipcRenderer.invoke('file:save', path, content),
   saveFileAs: (content: string, currentPath?: string | null): Promise<SaveResult> =>
     ipcRenderer.invoke('file:save-as', content, currentPath),
-  exportPdf: (html: string, defaultName?: string): Promise<SaveResult> =>
-    ipcRenderer.invoke('export:pdf', html, defaultName),
-  exportHtml: (html: string, defaultName?: string): Promise<SaveResult> =>
-    ipcRenderer.invoke('export:html', html, defaultName),
-  exportImage: (html: string, defaultName?: string): Promise<SaveResult> =>
-    ipcRenderer.invoke('export:image', html, defaultName),
+  exportPdf: (html: string, defaultName?: string, docPath?: string | null): Promise<SaveResult> =>
+    ipcRenderer.invoke('export:pdf', html, defaultName, docPath),
+  exportHtml: (html: string, defaultName?: string, docPath?: string | null): Promise<SaveResult> =>
+    ipcRenderer.invoke('export:html', html, defaultName, docPath),
+  exportImage: (html: string, defaultName?: string, docPath?: string | null): Promise<SaveResult> =>
+    ipcRenderer.invoke('export:image', html, defaultName, docPath),
   exportPandoc: (
     markdown: string,
     target: 'docx' | 'epub' | 'latex',

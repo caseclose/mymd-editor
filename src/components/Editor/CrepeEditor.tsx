@@ -4,10 +4,12 @@ import '@milkdown/crepe/theme/common/style.css'
 import '@milkdown/crepe/theme/nord.css'
 import type { Theme } from '../../types/api'
 import { renderMermaidDiagrams } from '../../lib/mermaid-render'
+import { createCrepeOptions } from './crepe-config'
 
 export interface CrepeEditorHandle {
   getMarkdown: () => string
   getHtml: () => string
+  renderHtml: (markdown: string) => Promise<string>
   setMarkdown: (content: string) => Promise<void>
   focus: () => void
   getContainer: () => HTMLElement | null
@@ -33,6 +35,7 @@ const CrepeEditor = forwardRef<CrepeEditorHandle, CrepeEditorProps>(
   ({ initialContent, theme, filePath, focusMode, typewriterMode, customThemeCss, hidden, onChange }, ref) => {
     const containerRef = useRef<HTMLDivElement>(null)
     const crepeRef = useRef<Crepe | null>(null)
+    const renderLockRef = useRef<Promise<string> | null>(null)
     const filePathRef = useRef(filePath)
     const themeRef = useRef(theme)
     const onChangeRef = useRef(onChange)
@@ -54,29 +57,7 @@ const CrepeEditor = forwardRef<CrepeEditorHandle, CrepeEditorProps>(
 
     const initCrepe = async (content: string): Promise<void> => {
       if (!containerRef.current) return
-      const crepe = new Crepe({
-        root: containerRef.current,
-        defaultValue: content,
-        features: {
-          [Crepe.Feature.Latex]: true,
-          [Crepe.Feature.Toolbar]: true,
-          [Crepe.Feature.CodeMirror]: true,
-          [Crepe.Feature.Table]: true,
-          [Crepe.Feature.ImageBlock]: true
-        },
-        featureConfigs: {
-          [Crepe.Feature.Placeholder]: {
-            text: '开始编写 Markdown...',
-            mode: 'block'
-          },
-          [Crepe.Feature.ImageBlock]: {
-            onUpload: uploadImage,
-            blockOnUpload: uploadImage,
-            inlineOnUpload: uploadImage,
-            proxyDomURL: (url) => url
-          }
-        }
-      })
+      const crepe = new Crepe(createCrepeOptions(containerRef.current, content, uploadImage))
       crepeRef.current = crepe
       await crepe.create()
       crepe.on((listener) => {
@@ -88,12 +69,43 @@ const CrepeEditor = forwardRef<CrepeEditorHandle, CrepeEditorProps>(
       await renderMermaidDiagrams(containerRef.current, themeRef.current)
     }
 
+    const renderHtmlFromMarkdown = async (markdown: string): Promise<string> => {
+      while (renderLockRef.current) {
+        await renderLockRef.current.catch(() => undefined)
+      }
+
+      const task = (async (): Promise<string> => {
+        const host = document.createElement('div')
+        host.style.cssText =
+          'position:fixed;left:-10000px;top:0;width:900px;visibility:hidden;pointer-events:none'
+        document.body.appendChild(host)
+        let crepe: Crepe | null = null
+        try {
+          crepe = new Crepe(createCrepeOptions(host, markdown, uploadImage))
+          await crepe.create()
+          await renderMermaidDiagrams(host, themeRef.current)
+          return host.querySelector('.milkdown')?.innerHTML ?? host.innerHTML
+        } finally {
+          await crepe?.destroy()
+          host.remove()
+        }
+      })()
+
+      renderLockRef.current = task
+      try {
+        return await task
+      } finally {
+        if (renderLockRef.current === task) renderLockRef.current = null
+      }
+    }
+
     useImperativeHandle(ref, () => ({
       getMarkdown: () => crepeRef.current?.getMarkdown() ?? '',
       getHtml: () =>
         containerRef.current?.querySelector('.milkdown')?.innerHTML ??
         containerRef.current?.innerHTML ??
         '',
+      renderHtml: renderHtmlFromMarkdown,
       setMarkdown: async (content: string) => {
         if (crepeRef.current) {
           await crepeRef.current.destroy()

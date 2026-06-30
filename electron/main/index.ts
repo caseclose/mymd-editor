@@ -28,7 +28,7 @@ function sendMenuAction(action: string): void {
   mainWindow?.webContents.send('menu-action', action)
 }
 
-function buildMenu(): void {
+function buildMenu(autoSaveChecked = true): void {
   const template: Electron.MenuItemConstructorOptions[] = [
     {
       label: '文件',
@@ -85,7 +85,7 @@ function buildMenu(): void {
         { label: '导入自定义主题...', click: () => sendMenuAction('import-theme') },
         { label: '清除自定义主题', click: () => sendMenuAction('clear-theme') },
         { type: 'separator' },
-        { label: '自动保存', type: 'checkbox', checked: true, click: (item) => sendMenuAction(item.checked ? 'autosave-on' : 'autosave-off') },
+        { label: '自动保存', type: 'checkbox', checked: autoSaveChecked, click: (item) => sendMenuAction(item.checked ? 'autosave-on' : 'autosave-off') },
         { type: 'separator' },
         { role: 'reload', label: '重新加载' },
         { role: 'toggleDevTools', label: '开发者工具' },
@@ -107,7 +107,7 @@ function buildMenu(): void {
               type: 'info',
               title: '关于 MyMD',
               message: 'MyMD',
-              detail: 'Typora 风格的 Markdown 编辑器\n版本 1.0.0'
+              detail: `Typora 风格的 Markdown 编辑器\n版本 ${app.getVersion()}`
             })
           }
         }
@@ -115,6 +115,23 @@ function buildMenu(): void {
     }
   ]
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
+}
+
+async function resolvePathArg(pathArg: string): Promise<{ filePath: string | null; folderPath: string | null }> {
+  const normalized = pathArg.replace(/[/\\]+$/, '')
+  try {
+    const info = await stat(normalized)
+    if (info.isDirectory()) return { filePath: null, folderPath: normalized }
+    return { filePath: normalized, folderPath: null }
+  } catch {
+    return { filePath: null, folderPath: null }
+  }
+}
+
+async function openFolderInWindow(folderPath: string): Promise<void> {
+  const tree = await readFolderTree(folderPath)
+  mainWindow?.webContents.send('folder-opened', { folderPath, tree })
+  if (mainWindow) watchFolder(folderPath, mainWindow)
 }
 
 function createWindow(): void {
@@ -173,31 +190,38 @@ if (!gotLock) {
 } else {
   app.on('second-instance', (_event, argv) => {
     const pathArg = argv.slice(app.isPackaged ? 1 : 2).find((arg) => !arg.startsWith('-'))
-    if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore()
-      mainWindow.focus()
-      if (pathArg) mainWindow.webContents.send('open-file-path', pathArg.replace(/[/\\]+$/, ''))
-    } else if (pathArg) {
-      pendingOpenPath = pathArg.replace(/[/\\]+$/, '')
-    }
+    void (async () => {
+      if (mainWindow) {
+        if (mainWindow.isMinimized()) mainWindow.restore()
+        mainWindow.focus()
+      }
+      if (!pathArg) return
+
+      const { filePath, folderPath } = await resolvePathArg(pathArg)
+      if (folderPath) {
+        if (mainWindow) await openFolderInWindow(folderPath)
+        else pendingOpenFolder = folderPath
+      } else if (filePath) {
+        if (mainWindow) mainWindow.webContents.send('open-file-path', filePath)
+        else pendingOpenPath = filePath
+      }
+    })()
   })
 
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
     electronApp.setAppUserModelId('com.mymd.editor')
     app.on('browser-window-created', (_, window) => optimizer.watchWindowShortcuts(window))
 
-    pendingOpenPath = getArgvPath()
-    if (pendingOpenPath) {
-      void stat(pendingOpenPath)
-        .then((info) => {
-          if (info.isDirectory()) {
-            pendingOpenFolder = pendingOpenPath
-            pendingOpenPath = null
-          }
-        })
-        .catch(() => undefined)
+    const prefs = await loadPreferences()
+    buildMenu(prefs.autoSave)
+
+    const argvPath = getArgvPath()
+    if (argvPath) {
+      const resolved = await resolvePathArg(argvPath)
+      pendingOpenPath = resolved.filePath
+      pendingOpenFolder = resolved.folderPath
     }
-    buildMenu()
+
     createWindow()
 
     ipcMain.handle('file:open', async () => {
@@ -262,8 +286,13 @@ if (!gotLock) {
         if (result.canceled || !result.filePath) return { canceled: true as const }
         targetPath = result.filePath.endsWith('.md') ? result.filePath : `${result.filePath}.md`
       }
-      await writeFile(targetPath, content, 'utf-8')
-      return { path: targetPath, canceled: false as const }
+      try {
+        await writeFile(targetPath, content, 'utf-8')
+        return { path: targetPath, canceled: false as const }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : '保存失败'
+        return { canceled: false as const, error: message }
+      }
     })
 
     ipcMain.handle('file:save-as', async (_event, content: string, currentPath?: string | null) => {
@@ -273,41 +302,62 @@ if (!gotLock) {
       })
       if (result.canceled || !result.filePath) return { canceled: true as const }
       const targetPath = result.filePath.endsWith('.md') ? result.filePath : `${result.filePath}.md`
-      await writeFile(targetPath, content, 'utf-8')
-      return { path: targetPath, canceled: false as const }
+      try {
+        await writeFile(targetPath, content, 'utf-8')
+        return { path: targetPath, canceled: false as const }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : '保存失败'
+        return { canceled: false as const, error: message }
+      }
     })
 
-    ipcMain.handle('export:pdf', async (_event, html: string, defaultName?: string) => {
+    ipcMain.handle('export:pdf', async (_event, html: string, defaultName?: string, docPath?: string | null) => {
       const result = await dialog.showSaveDialog(mainWindow!, {
         filters: [{ name: 'PDF', extensions: ['pdf'] }],
         defaultPath: defaultName?.replace(/\.md$/i, '.pdf') || 'document.pdf'
       })
       if (result.canceled || !result.filePath) return { canceled: true as const }
       const filePath = result.filePath.endsWith('.pdf') ? result.filePath : `${result.filePath}.pdf`
-      await exportHtmlToPdf(html, filePath)
-      return { path: filePath, canceled: false as const }
+      try {
+        await exportHtmlToPdf(html, filePath, docPath)
+        return { path: filePath, canceled: false as const }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : '导出 PDF 失败'
+        return { canceled: false as const, error: message }
+      }
     })
 
-    ipcMain.handle('export:html', async (_event, html: string, defaultName?: string) => {
+    ipcMain.handle('export:html', async (_event, html: string, defaultName?: string, docPath?: string | null) => {
       const result = await dialog.showSaveDialog(mainWindow!, {
         filters: [{ name: 'HTML', extensions: ['html', 'htm'] }],
         defaultPath: defaultName?.replace(/\.md$/i, '.html') || 'document.html'
       })
       if (result.canceled || !result.filePath) return { canceled: true as const }
-      const filePath = result.filePath.endsWith('.html') ? result.filePath : `${result.filePath}.html`
-      await exportHtmlFile(html, filePath)
-      return { path: filePath, canceled: false as const }
+      const filePath =
+        /\.html?$/i.test(result.filePath) ? result.filePath : `${result.filePath}.html`
+      try {
+        await exportHtmlFile(html, filePath, docPath)
+        return { path: filePath, canceled: false as const }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : '导出 HTML 失败'
+        return { canceled: false as const, error: message }
+      }
     })
 
-    ipcMain.handle('export:image', async (_event, html: string, defaultName?: string) => {
+    ipcMain.handle('export:image', async (_event, html: string, defaultName?: string, docPath?: string | null) => {
       const result = await dialog.showSaveDialog(mainWindow!, {
         filters: [{ name: 'PNG Image', extensions: ['png'] }],
         defaultPath: defaultName?.replace(/\.md$/i, '.png') || 'document.png'
       })
       if (result.canceled || !result.filePath) return { canceled: true as const }
       const filePath = result.filePath.endsWith('.png') ? result.filePath : `${result.filePath}.png`
-      await exportHtmlToImage(html, filePath)
-      return { path: filePath, canceled: false as const }
+      try {
+        await exportHtmlToImage(html, filePath, docPath)
+        return { path: filePath, canceled: false as const }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : '导出图片失败'
+        return { canceled: false as const, error: message }
+      }
     })
 
     ipcMain.handle('export:pandoc', async (_event, markdown: string, target: 'docx' | 'epub' | 'latex', defaultName?: string) => {
@@ -326,12 +376,17 @@ if (!gotLock) {
           if (mainWindow) await showPandocNotFoundDialog(mainWindow)
           return { canceled: true as const, error: 'PANDOC_NOT_FOUND' }
         }
-        throw err
+        const message = err instanceof Error ? err.message : '导出失败'
+        return { canceled: false as const, error: message }
       }
     })
 
     ipcMain.handle('prefs:get', async () => loadPreferences())
-    ipcMain.handle('prefs:set', async (_event, partial) => savePreferences(partial))
+    ipcMain.handle('prefs:set', async (_event, partial) => {
+      const next = await savePreferences(partial)
+      if (partial.autoSave !== undefined) buildMenu(next.autoSave)
+      return next
+    })
 
     ipcMain.handle('theme:import', async () => {
       const result = await dialog.showOpenDialog(mainWindow!, {

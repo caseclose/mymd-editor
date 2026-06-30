@@ -4,9 +4,16 @@ import { join } from 'path'
 import { tmpdir } from 'os'
 import { randomUUID } from 'crypto'
 
-export async function exportHtmlToPdf(html: string, outputPath: string): Promise<void> {
+import { inlineLocalImages } from './export-images'
+
+export async function exportHtmlToPdf(
+  html: string,
+  outputPath: string,
+  docPath?: string | null
+): Promise<void> {
+  const inlinedHtml = await inlineLocalImages(html, docPath)
   const tempPath = join(tmpdir(), `mymd-export-${randomUUID()}.html`)
-  await writeFile(tempPath, html, 'utf-8')
+  await writeFile(tempPath, inlinedHtml, 'utf-8')
 
   const pdfWindow = new BrowserWindow({
     show: false,

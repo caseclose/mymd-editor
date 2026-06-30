@@ -51,9 +51,9 @@ export interface MyMDApi {
   listFolder: (folderPath: string) => Promise<FolderOpenResult | null>
   saveFile: (path: string | null, content: string) => Promise<SaveResult>
   saveFileAs: (content: string, currentPath?: string | null) => Promise<SaveResult>
-  exportPdf: (html: string, defaultName?: string) => Promise<SaveResult>
-  exportHtml: (html: string, defaultName?: string) => Promise<SaveResult>
-  exportImage: (html: string, defaultName?: string) => Promise<SaveResult>
+  exportPdf: (html: string, defaultName?: string, docPath?: string | null) => Promise<SaveResult>
+  exportHtml: (html: string, defaultName?: string, docPath?: string | null) => Promise<SaveResult>
+  exportImage: (html: string, defaultName?: string, docPath?: string | null) => Promise<SaveResult>
   exportPandoc: (
     markdown: string,
     target: 'docx' | 'epub' | 'latex',

@@ -5,12 +5,14 @@ import { tmpdir } from 'os'
 import { randomUUID } from 'crypto'
 import { spawn } from 'child_process'
 import { exportHtmlToPdf } from './export-pdf'
+import { inlineLocalImages } from './export-images'
 
 export { exportHtmlToPdf }
 
-async function loadHtmlInHiddenWindow(html: string): Promise<BrowserWindow> {
+async function loadHtmlInHiddenWindow(html: string, docPath?: string | null): Promise<BrowserWindow> {
+  const inlinedHtml = await inlineLocalImages(html, docPath)
   const tempPath = join(tmpdir(), `mymd-export-${randomUUID()}.html`)
-  await writeFile(tempPath, html, 'utf-8')
+  await writeFile(tempPath, inlinedHtml, 'utf-8')
 
   const win = new BrowserWindow({
     show: false,
@@ -40,12 +42,21 @@ async function loadHtmlInHiddenWindow(html: string): Promise<BrowserWindow> {
   return win
 }
 
-export async function exportHtmlFile(html: string, outputPath: string): Promise<void> {
-  await writeFile(outputPath, html, 'utf-8')
+export async function exportHtmlFile(
+  html: string,
+  outputPath: string,
+  docPath?: string | null
+): Promise<void> {
+  const inlinedHtml = await inlineLocalImages(html, docPath)
+  await writeFile(outputPath, inlinedHtml, 'utf-8')
 }
 
-export async function exportHtmlToImage(html: string, outputPath: string): Promise<void> {
-  const win = await loadHtmlInHiddenWindow(html)
+export async function exportHtmlToImage(
+  html: string,
+  outputPath: string,
+  docPath?: string | null
+): Promise<void> {
+  const win = await loadHtmlInHiddenWindow(html, docPath)
   try {
     const height = await win.webContents.executeJavaScript(
       'Math.max(document.body.scrollHeight, document.documentElement.scrollHeight)'
@@ -62,7 +73,7 @@ export async function exportHtmlToImage(html: string, outputPath: string): Promi
 export async function findPandoc(): Promise<string | null> {
   return new Promise((resolve) => {
     const cmd = process.platform === 'win32' ? 'where' : 'which'
-    const proc = spawn(cmd, ['pandoc'], { shell: true })
+    const proc = spawn(cmd, ['pandoc'], { shell: false })
     let output = ''
     proc.stdout.on('data', (chunk: Buffer) => {
       output += chunk.toString()
@@ -94,7 +105,7 @@ export async function exportWithPandoc(
 
   await new Promise<void>((resolve, reject) => {
     const proc = spawn(pandoc, ['-f', 'gfm', '-t', target, '-o', outputPath, mdPath], {
-      shell: true
+      shell: false
     })
     let stderr = ''
     proc.stderr.on('data', (chunk: Buffer) => {
