@@ -25,6 +25,9 @@ export type MenuAction =
   | 'autosave-off'
   | 'find'
   | 'replace'
+  | 'zoom-in'
+  | 'zoom-out'
+  | 'zoom-reset'
 
 export interface FileOpenResult {
   path: string
@@ -35,6 +38,7 @@ export interface SaveResult {
   path?: string
   canceled: boolean
   error?: string
+  warning?: string
 }
 
 export interface FileTreeNode {
@@ -54,11 +58,25 @@ export interface ImageSaveResult {
   relativePath: string
 }
 
-export interface AppPreferences {
-  autoSave: boolean
-  autoSaveIntervalMs: number
-  customThemeCss: string | null
-  customThemeName: string | null
+export type UnsavedDialogResult = 'save' | 'discard' | 'cancel'
+
+export interface UnsavedDialogOptions {
+  dirtyCount?: number
+  tabTitles?: string[]
+}
+
+export interface RecoveryTabSnapshot {
+  id: string
+  filePath: string | null
+  content: string
+  savedContent: string
+  editorView: 'wysiwyg' | 'source'
+}
+
+export interface RecoverySnapshot {
+  tabs: RecoveryTabSnapshot[]
+  activeTabId: string
+  savedAt: string
 }
 
 const api = {
@@ -100,6 +118,12 @@ const api = {
   closeWindow: (): Promise<void> => ipcRenderer.invoke('window:close'),
   forceCloseWindow: (): Promise<void> => ipcRenderer.invoke('window:force-close'),
   isMaximized: (): Promise<boolean> => ipcRenderer.invoke('window:is-maximized'),
+  showUnsavedDialog: (options?: UnsavedDialogOptions): Promise<UnsavedDialogResult> =>
+    ipcRenderer.invoke('dialog:unsaved', options),
+  saveRecovery: (snapshot: RecoverySnapshot): Promise<void> =>
+    ipcRenderer.invoke('recovery:save', snapshot),
+  loadRecovery: (): Promise<RecoverySnapshot | null> => ipcRenderer.invoke('recovery:load'),
+  clearRecovery: (): Promise<void> => ipcRenderer.invoke('recovery:clear'),
   getPlatform: (): NodeJS.Platform => process.platform,
   onMenuAction: (callback: (action: MenuAction) => void): (() => void) => {
     const handler = (_event: Electron.IpcRendererEvent, action: MenuAction): void => callback(action)

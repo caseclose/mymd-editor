@@ -146,7 +146,7 @@
 
 <table>
 <tr>
-<td width="33%" valign="top">
+<td width="50%" valign="top">
 
 **数学公式**
 
@@ -155,7 +155,7 @@ KaTeX 渲染行内与块级公式。
 <img src="docs/screenshots/math-katex.png" alt="数学公式" width="100%" />
 
 </td>
-<td width="33%" valign="top">
+<td width="50%" valign="top">
 
 **Mermaid 图表**
 
@@ -164,7 +164,9 @@ KaTeX 渲染行内与块级公式。
 <img src="docs/screenshots/mermaid-chart.png" alt="Mermaid" width="100%" />
 
 </td>
-<td width="33%" valign="top">
+</tr>
+<tr>
+<td width="50%" valign="top">
 
 **代码高亮**
 
@@ -173,8 +175,6 @@ CodeMirror 驱动，多语言语法着色。
 <img src="docs/screenshots/code-highlight.png" alt="代码高亮" width="100%" />
 
 </td>
-</tr>
-<tr>
 <td width="50%" valign="top">
 
 **图片嵌入**
@@ -184,7 +184,9 @@ CodeMirror 驱动，多语言语法着色。
 <img src="docs/screenshots/image-embed.png" alt="图片嵌入" width="100%" />
 
 </td>
-<td width="50%" valign="top">
+</tr>
+<tr>
+<td colspan="2" valign="top">
 
 **自定义主题**
 

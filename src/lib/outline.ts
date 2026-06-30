@@ -9,12 +9,16 @@ export function parseOutline(markdown: string): OutlineItem[] {
     if (!match) continue
     items.push({
       level: match[1].length,
-      text: match[2].replace(/[*_`[\]()]/g, '').trim(),
+      text: normalizeHeadingText(match[2]),
       line: i
     })
   }
 
   return items
+}
+
+export function normalizeHeadingText(text: string): string {
+  return text.replace(/[*_`[\]()]/g, '').trim()
 }
 
 export function scrollToOutlineItem(
@@ -27,6 +31,18 @@ export function scrollToOutlineItem(
   const index = items.findIndex((h) => h.line === item.line && h.text === item.text)
   if (index < 0) return
 
-  const headings = container.querySelectorAll('h1, h2, h3, h4, h5, h6')
-  headings[index]?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  const headings = Array.from(container.querySelectorAll('h1, h2, h3, h4, h5, h6'))
+  const byIndex = headings[index]
+  if (byIndex instanceof HTMLElement) {
+    byIndex.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    return
+  }
+
+  const target = items[index]
+  const byText = headings.find(
+    (h) => normalizeHeadingText(h.textContent ?? '') === target.text
+  )
+  if (byText instanceof HTMLElement) {
+    byText.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }
 }

@@ -1,3 +1,5 @@
+import mymdIcon from '../../assets/mymd-icon.svg'
+
 interface TitleBarProps {
   title: string
   isDirty: boolean
@@ -19,7 +21,8 @@ export default function TitleBar({
 
   return (
     <div className="titlebar flex h-9 shrink-0 select-none items-center justify-between border-b border-gray-200 bg-shell-light dark:border-gray-700 dark:bg-shell-dark">
-      <div className="flex min-w-0 flex-1 items-center px-4">
+      <div className="flex min-w-0 flex-1 items-center gap-2.5 px-4">
+        <img src={mymdIcon} alt="MyMD" className="h-[18px] w-[18px] shrink-0" draggable={false} />
         <span className="truncate text-sm text-gray-600 dark:text-gray-300">{displayTitle}</span>
       </div>
       <div className="flex h-full">

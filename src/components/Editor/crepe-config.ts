@@ -3,7 +3,8 @@ import { Crepe } from '@milkdown/crepe'
 export function createCrepeOptions(
   root: HTMLElement,
   content: string,
-  uploadImage: (file: File) => Promise<string>
+  uploadImage: (file: File) => Promise<string>,
+  proxyDomURL: (url: string) => string = (url) => url
 ): ConstructorParameters<typeof Crepe>[0] {
   return {
     root,
@@ -24,7 +25,7 @@ export function createCrepeOptions(
         onUpload: uploadImage,
         blockOnUpload: uploadImage,
         inlineOnUpload: uploadImage,
-        proxyDomURL: (url) => url
+        proxyDomURL
       }
     }
   }

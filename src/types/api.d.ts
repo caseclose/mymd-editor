@@ -12,6 +12,7 @@ export interface SaveResult {
   path?: string
   canceled: boolean
   error?: string
+  warning?: string
 }
 
 export interface FileTreeNode {
@@ -36,6 +37,28 @@ export interface AppPreferences {
   autoSaveIntervalMs: number
   customThemeCss: string | null
   customThemeName: string | null
+  editorZoomPercent: number
+}
+
+export type UnsavedDialogResult = 'save' | 'discard' | 'cancel'
+
+export interface UnsavedDialogOptions {
+  dirtyCount?: number
+  tabTitles?: string[]
+}
+
+export interface RecoveryTabSnapshot {
+  id: string
+  filePath: string | null
+  content: string
+  savedContent: string
+  editorView: EditorView
+}
+
+export interface RecoverySnapshot {
+  tabs: RecoveryTabSnapshot[]
+  activeTabId: string
+  savedAt: string
 }
 
 export interface OutlineItem {
@@ -74,6 +97,10 @@ export interface MyMDApi {
   closeWindow: () => Promise<void>
   forceCloseWindow: () => Promise<void>
   isMaximized: () => Promise<boolean>
+  showUnsavedDialog: (options?: UnsavedDialogOptions) => Promise<UnsavedDialogResult>
+  saveRecovery: (snapshot: RecoverySnapshot) => Promise<void>
+  loadRecovery: () => Promise<RecoverySnapshot | null>
+  clearRecovery: () => Promise<void>
   getPlatform: () => NodeJS.Platform
   onMenuAction: (callback: (action: MenuAction) => void) => () => void
   onOpenFilePath: (callback: (filePath: string) => void) => () => void

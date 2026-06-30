@@ -8,13 +8,15 @@ export interface AppPreferences {
   autoSaveIntervalMs: number
   customThemeCss: string | null
   customThemeName: string | null
+  editorZoomPercent: number
 }
 
 const DEFAULTS: AppPreferences = {
   autoSave: true,
   autoSaveIntervalMs: 30000,
   customThemeCss: null,
-  customThemeName: null
+  customThemeName: null,
+  editorZoomPercent: 100
 }
 
 function prefsPath(): string {

@@ -1,9 +1,14 @@
-import { app, shell, BrowserWindow, ipcMain, dialog, Menu } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, dialog, Menu, nativeImage } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { readFile, writeFile, stat } from 'fs/promises'
 import { exportHtmlToPdf, exportHtmlFile, exportHtmlToImage, exportWithPandoc, showPandocNotFoundDialog } from './export'
 import { loadPreferences, savePreferences } from './preferences'
+import {
+  saveRecoverySnapshot,
+  loadRecoverySnapshot,
+  clearRecoverySnapshot
+} from './recovery'
 import {
   readFolderTree,
   saveImageAsset,
@@ -12,6 +17,12 @@ import {
   type FileTreeNode
 } from './fs-utils'
 import { watchFolder, stopWatching } from './folder-watcher'
+import { applyAppIcon, getAppIconPath } from './app-icon'
+
+// Opt-in only: disabling GPU can cause a blank window on some Windows drivers.
+if (process.env.MYMD_DISABLE_GPU === '1') {
+  app.disableHardwareAcceleration()
+}
 
 let mainWindow: BrowserWindow | null = null
 let pendingOpenPath: string | null = null
@@ -87,12 +98,12 @@ function buildMenu(autoSaveChecked = true): void {
         { type: 'separator' },
         { label: '自动保存', type: 'checkbox', checked: autoSaveChecked, click: (item) => sendMenuAction(item.checked ? 'autosave-on' : 'autosave-off') },
         { type: 'separator' },
+        { label: '放大', accelerator: 'CmdOrCtrl+=', click: () => sendMenuAction('zoom-in') },
+        { label: '缩小', accelerator: 'CmdOrCtrl+-', click: () => sendMenuAction('zoom-out') },
+        { label: '重置缩放', accelerator: 'CmdOrCtrl+0', click: () => sendMenuAction('zoom-reset') },
+        { type: 'separator' },
         { role: 'reload', label: '重新加载' },
         { role: 'toggleDevTools', label: '开发者工具' },
-        { type: 'separator' },
-        { role: 'resetZoom', label: '重置缩放' },
-        { role: 'zoomIn', label: '放大' },
-        { role: 'zoomOut', label: '缩小' },
         { type: 'separator' },
         { role: 'togglefullscreen', label: '全屏' }
       ]
@@ -135,6 +146,7 @@ async function openFolderInWindow(folderPath: string): Promise<void> {
 }
 
 function createWindow(): void {
+  const iconPath = getAppIconPath()
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -143,6 +155,7 @@ function createWindow(): void {
     show: false,
     frame: false,
     backgroundColor: '#ffffff',
+    ...(iconPath ? { icon: nativeImage.createFromPath(iconPath) } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
@@ -152,6 +165,7 @@ function createWindow(): void {
   })
 
   mainWindow.on('ready-to-show', () => {
+    applyAppIcon(mainWindow)
     mainWindow?.show()
     if (pendingOpenPath) {
       mainWindow?.webContents.send('open-file-path', pendingOpenPath)
@@ -167,6 +181,16 @@ function createWindow(): void {
     }
   })
 
+  mainWindow.webContents.on('did-fail-load', (_event, code, description, url) => {
+    console.error('[MyMD] Renderer failed to load:', code, description, url)
+  })
+
+  if (is.dev) {
+    mainWindow.webContents.on('render-process-gone', (_event, details) => {
+      console.error('[MyMD] Renderer process gone:', details.reason)
+    })
+  }
+
   mainWindow.on('close', (event) => {
     mainWindow?.webContents.send('window-close-request')
     event.preventDefault()
@@ -179,6 +203,9 @@ function createWindow(): void {
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
     mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
+    mainWindow.webContents.on('before-input-event', (_event, input) => {
+      if (input.key === 'F12') mainWindow?.webContents.toggleDevTools()
+    })
   } else {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
   }
@@ -223,6 +250,7 @@ if (!gotLock) {
     }
 
     createWindow()
+    applyAppIcon(mainWindow)
 
     ipcMain.handle('file:open', async () => {
       const result = await dialog.showOpenDialog(mainWindow!, {
@@ -352,8 +380,12 @@ if (!gotLock) {
       if (result.canceled || !result.filePath) return { canceled: true as const }
       const filePath = result.filePath.endsWith('.png') ? result.filePath : `${result.filePath}.png`
       try {
-        await exportHtmlToImage(html, filePath, docPath)
-        return { path: filePath, canceled: false as const }
+        const { truncated } = await exportHtmlToImage(html, filePath, docPath)
+        return {
+          path: filePath,
+          canceled: false as const,
+          warning: truncated ? '文档较长，PNG 已截断至 16000 像素高度' : undefined
+        }
       } catch (err) {
         const message = err instanceof Error ? err.message : '导出图片失败'
         return { canceled: false as const, error: message }
@@ -403,6 +435,39 @@ if (!gotLock) {
 
     ipcMain.handle('theme:clear', async () => {
       return savePreferences({ customThemeCss: null, customThemeName: null })
+    })
+
+    ipcMain.handle(
+      'dialog:unsaved',
+      async (_event, options?: { dirtyCount?: number; tabTitles?: string[] }) => {
+        const count = options?.dirtyCount ?? 1
+        const titles = options?.tabTitles?.filter(Boolean) ?? []
+        let detail = '是否保存更改？'
+        if (count > 1) {
+          const list = titles.length > 0 ? `\n${titles.map((t) => `· ${t}`).join('\n')}\n` : '\n'
+          detail = `${count} 个文档有未保存的更改：${list}\n是否在关闭前保存全部？`
+        } else if (titles[0]) {
+          detail = `文档「${titles[0]}」已修改。是否保存更改？`
+        }
+        const result = await dialog.showMessageBox(mainWindow!, {
+          type: 'question',
+          buttons: ['保存', '不保存', '取消'],
+          defaultId: 0,
+          cancelId: 2,
+          noLink: true,
+          message: count > 1 ? '多个文档已修改' : '文档已修改',
+          detail
+        })
+        return (['save', 'discard', 'cancel'] as const)[result.response]
+      }
+    )
+
+    ipcMain.handle('recovery:save', async (_event, snapshot) => {
+      await saveRecoverySnapshot(snapshot)
+    })
+    ipcMain.handle('recovery:load', async () => loadRecoverySnapshot())
+    ipcMain.handle('recovery:clear', async () => {
+      await clearRecoverySnapshot()
     })
 
     ipcMain.handle('window:minimize', () => mainWindow?.minimize())

@@ -2,10 +2,20 @@ import mermaid from 'mermaid'
 
 let initialized = false
 
+function clearMermaidArtifacts(root: HTMLElement): void {
+  root.querySelectorAll('.mermaid-diagram.mymd-mermaid').forEach((el) => el.remove())
+  root.querySelectorAll<HTMLElement>('[data-mermaid-rendered="true"]').forEach((el) => {
+    delete el.dataset.mermaidRendered
+  })
+}
+
 export async function renderMermaidDiagrams(
-  root: HTMLElement,
-  theme: 'light' | 'dark'
+  root: HTMLElement | null | undefined,
+  theme: 'light' | 'dark',
+  reset = false
 ): Promise<void> {
+  if (!root) return
+
   mermaid.initialize({
     startOnLoad: false,
     theme: theme === 'dark' ? 'dark' : 'default',
@@ -14,6 +24,10 @@ export async function renderMermaidDiagrams(
 
   if (!initialized) {
     initialized = true
+  }
+
+  if (reset) {
+    clearMermaidArtifacts(root)
   }
 
   const candidates = root.querySelectorAll<HTMLElement>(

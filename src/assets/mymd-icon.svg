@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none" role="img" aria-label="MyMD">
+  <rect width="32" height="32" rx="7" fill="#2563EB"/>
+  <path
+    d="M7.5 22V10h3.35l3.15 6.85L17.15 10H20.5v12h-2.55v-7.15L14.2 22h-1.95l-3.75-7.15V22H7.5z"
+    fill="#fff"
+  />
+  <path d="M21.5 23.25h6.5" stroke="#fff" stroke-width="1.6" stroke-linecap="round" opacity="0.9"/>
+</svg>

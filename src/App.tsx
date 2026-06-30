@@ -1,15 +1,27 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import CrepeEditor, { type CrepeEditorHandle } from './components/Editor/CrepeEditor'
-import SourceEditor from './components/Editor/SourceEditor'
+import SourceEditor, { type SourceEditorHandle } from './components/Editor/SourceEditor'
 import TitleBar from './components/TitleBar/TitleBar'
 import StatusBar from './components/StatusBar/StatusBar'
 import FileSidebar from './components/Sidebar/FileSidebar'
 import OutlinePanel from './components/Outline/OutlinePanel'
 import SearchDialog, { type SearchMode } from './components/Search/SearchDialog'
+import TabBar from './components/TabBar/TabBar'
 import { buildExportHtml, getDocumentTitle } from './lib/export-html'
+import { normalizeMarkdownImagePaths, sameFilePath } from './lib/image-paths'
 import { parseOutline, scrollToOutlineItem } from './lib/outline'
+import { findMatchesInMarkdown } from './lib/search'
 import { notifyError, formatErrorMessage } from './lib/errors'
-import type { AppPreferences, EditorView, FileTreeNode, Theme } from './types/api'
+import { hasApi } from './lib/runtime'
+import {
+  EDITOR_ZOOM_DEFAULT,
+  EDITOR_ZOOM_STEP,
+  clampEditorZoom,
+  editorZoomFactor,
+  stepEditorZoom
+} from './lib/editor-zoom'
+import { createTab, tabIsDirty, tabTitle, type EditorTab } from './types/tab'
+import type { AppPreferences, FileTreeNode, RecoverySnapshot, Theme, UnsavedDialogOptions } from './types/api'
 import './styles/typora-light.css'
 import './styles/typora-dark.css'
 
@@ -41,44 +53,161 @@ function countWords(text: string): number {
 
 export default function App(): React.JSX.Element {
   const editorRef = useRef<CrepeEditorHandle>(null)
+  const sourceRef = useRef<SourceEditorHandle>(null)
+  const tabsRef = useRef<EditorTab[]>([])
+  const activeTabIdRef = useRef('')
+  const getMarkdownRef = useRef(() => '')
+
+  const initialTab = useMemo(
+    () => createTab({ content: DEFAULT_CONTENT, savedContent: DEFAULT_CONTENT }),
+    []
+  )
+  const [bootstrapped, setBootstrapped] = useState(false)
+  const [tabs, setTabs] = useState<EditorTab[]>([])
+  const [activeTabId, setActiveTabId] = useState('')
+  const [pendingRecovery, setPendingRecovery] = useState<RecoverySnapshot | null>(null)
+
   const [theme, setTheme] = useState<Theme>('light')
-  const [filePath, setFilePath] = useState<string | null>(null)
   const [folderPath, setFolderPath] = useState<string | null>(null)
   const [fileTree, setFileTree] = useState<FileTreeNode[]>([])
-  const [savedContent, setSavedContent] = useState(DEFAULT_CONTENT)
-  const [currentContent, setCurrentContent] = useState(DEFAULT_CONTENT)
   const [isMaximized, setIsMaximized] = useState(false)
   const [showSidebar, setShowSidebar] = useState(true)
   const [showOutline, setShowOutline] = useState(true)
   const [searchMode, setSearchMode] = useState<SearchMode | null>(null)
-  const [editorView, setEditorView] = useState<EditorView>('wysiwyg')
   const [focusMode, setFocusMode] = useState(false)
   const [typewriterMode, setTypewriterMode] = useState(false)
   const [prefs, setPrefs] = useState<AppPreferences>({
     autoSave: true,
     autoSaveIntervalMs: 30000,
     customThemeCss: null,
-    customThemeName: null
+    customThemeName: null,
+    editorZoomPercent: EDITOR_ZOOM_DEFAULT
   })
+  const editorZoom = prefs.editorZoomPercent ?? EDITOR_ZOOM_DEFAULT
 
-  const isDirty = currentContent !== savedContent
+  const activeTab = useMemo(() => {
+    if (!bootstrapped || tabs.length === 0) return initialTab
+    return tabs.find((t) => t.id === activeTabId) ?? tabs[0]
+  }, [bootstrapped, tabs, activeTabId, initialTab])
+  const { filePath, content: currentContent, editorView } = activeTab
+  const isDirty = tabIsDirty(activeTab)
   const outlineItems = useMemo(() => parseOutline(currentContent), [currentContent])
 
-  const getMarkdown = useCallback(
-    () => (editorView === 'source' ? currentContent : (editorRef.current?.getMarkdown() ?? currentContent)),
-    [editorView, currentContent]
+  const updateActiveTab = useCallback(
+    (patch: Partial<EditorTab>) => {
+      setTabs((prev) => prev.map((t) => (t.id === activeTabId ? { ...t, ...patch } : t)))
+    },
+    [activeTabId]
   )
 
-  const getTitle = useCallback((): string => {
-    if (filePath) return filePath.split(/[/\\]/).pop() ?? '未命名'
-    return '未命名'
-  }, [filePath])
+  const getMarkdown = useCallback(() => {
+    if (editorView === 'source') return currentContent
+    return editorRef.current?.getMarkdown() ?? currentContent
+  }, [editorView, currentContent])
+
+  tabsRef.current = tabs
+  activeTabIdRef.current = activeTabId
+  getMarkdownRef.current = getMarkdown
+
+  const unsavedDialogOptions = useCallback(
+    (dirty: EditorTab[]): UnsavedDialogOptions => ({
+      dirtyCount: dirty.length,
+      tabTitles: dirty.map((t) => tabTitle(t))
+    }),
+    []
+  )
+
+  const flushActiveTabContent = useCallback(() => {
+    const md = getMarkdown()
+    updateActiveTab({ content: md })
+    return md
+  }, [getMarkdown, updateActiveTab])
 
   const applyTheme = useCallback((next: Theme) => {
     setTheme(next)
     document.documentElement.classList.toggle('dark', next === 'dark')
     document.body.style.backgroundColor = next === 'dark' ? '#1e1e1e' : '#ffffff'
   }, [])
+
+  const setEditorZoom = useCallback((next: number) => {
+    const clamped = clampEditorZoom(next)
+    setPrefs((prev) => ({ ...prev, editorZoomPercent: clamped }))
+    if (hasApi()) void window.api.setPreferences({ editorZoomPercent: clamped })
+  }, [])
+
+  const zoomIn = useCallback(
+    () => setEditorZoom(stepEditorZoom(editorZoom, EDITOR_ZOOM_STEP)),
+    [editorZoom, setEditorZoom]
+  )
+  const zoomOut = useCallback(
+    () => setEditorZoom(stepEditorZoom(editorZoom, -EDITOR_ZOOM_STEP)),
+    [editorZoom, setEditorZoom]
+  )
+  const zoomReset = useCallback(() => setEditorZoom(EDITOR_ZOOM_DEFAULT), [setEditorZoom])
+
+  const handleEditorWheel = useCallback(
+    (event: React.WheelEvent) => {
+      if (!event.ctrlKey && !event.metaKey) return
+      event.preventDefault()
+      const delta = event.deltaY < 0 ? EDITOR_ZOOM_STEP : -EDITOR_ZOOM_STEP
+      setEditorZoom(stepEditorZoom(editorZoom, delta))
+    },
+    [editorZoom, setEditorZoom]
+  )
+
+  const refreshFolder = useCallback(async (path: string) => {
+    const result = await window.api.listFolder(path)
+    if (result) {
+      setFolderPath(result.folderPath)
+      setFileTree(result.tree)
+    }
+  }, [])
+
+  const saveTab = useCallback(
+    async (tabId: string, content: string, options?: { silent?: boolean }): Promise<boolean> => {
+      const tab = tabsRef.current.find((t) => t.id === tabId)
+      if (!tab) return false
+      try {
+        const result = await window.api.saveFile(tab.filePath, content)
+        if (result.canceled) return false
+        if (result.error) {
+          notifyError(`保存失败：${result.error}`, options?.silent)
+          return false
+        }
+        if (result.path) {
+          setTabs((prev) => {
+            const next = prev.map((t) =>
+              t.id === tabId
+                ? { ...t, filePath: result.path!, savedContent: content, content }
+                : t
+            )
+            tabsRef.current = next
+            if (!next.some(tabIsDirty)) void window.api.clearRecovery()
+            return next
+          })
+          if (folderPath) void refreshFolder(folderPath)
+          return true
+        }
+        return false
+      } catch (error) {
+        notifyError(`保存失败：${formatErrorMessage(error)}`, options?.silent)
+        return false
+      }
+    },
+    [folderPath, refreshFolder]
+  )
+
+  const saveAllDirtyTabs = useCallback(
+    async (dirtyTabs: EditorTab[], activeId: string, activeContent: string): Promise<boolean> => {
+      for (const tab of dirtyTabs) {
+        const content = tab.id === activeId ? activeContent : tab.content
+        const ok = await saveTab(tab.id, content)
+        if (!ok) return false
+      }
+      return true
+    },
+    [saveTab]
+  )
 
   const buildExportPayload = useCallback(
     async (styled: boolean) => {
@@ -93,64 +222,105 @@ export default function App(): React.JSX.Element {
         html: buildExportHtml(title, htmlBody ?? '', {
           styled,
           extraCss: prefs.customThemeCss,
-          dark: false
+          dark: theme === 'dark'
         }),
         defaultName: filePath?.split(/[/\\]/).pop() ?? `${title}.md`,
         docPath: filePath
       }
     },
-    [editorView, filePath, getMarkdown, prefs.customThemeCss]
+    [editorView, filePath, getMarkdown, prefs.customThemeCss, theme]
   )
 
-  const refreshFolder = useCallback(async (path: string) => {
-    const result = await window.api.listFolder(path)
-    if (result) {
-      setFolderPath(result.folderPath)
-      setFileTree(result.tree)
-    }
-  }, [])
+  const switchTab = useCallback(
+    async (tabId: string) => {
+      if (tabId === activeTabId) return
+      const md = flushActiveTabContent()
+      const current = tabs.find((t) => t.id === activeTabId)
+      if (current && tabIsDirty({ ...current, content: md })) {
+        const action = await window.api.showUnsavedDialog(
+          unsavedDialogOptions([{ ...current, content: md }])
+        )
+        if (action === 'cancel') return
+        if (action === 'save') {
+          const ok = await saveTab(activeTabId, md)
+          if (!ok) return
+        }
+      }
+      setActiveTabId(tabId)
+    },
+    [activeTabId, flushActiveTabContent, tabs, saveTab, unsavedDialogOptions]
+  )
 
   const handleNew = useCallback(async () => {
-    if (isDirty) {
-      const choice = window.confirm('文档已修改，是否放弃更改并新建？')
-      if (!choice) return
+    const md = flushActiveTabContent()
+    if (tabIsDirty({ ...activeTab, content: md })) {
+      const action = await window.api.showUnsavedDialog(
+        unsavedDialogOptions([{ ...activeTab, content: md }])
+      )
+      if (action === 'cancel') return
+      if (action === 'save') {
+        const ok = await saveTab(activeTabId, md)
+        if (!ok) return
+      }
     }
-    setFilePath(null)
-    setSavedContent('')
-    setCurrentContent('')
-    setEditorView('wysiwyg')
+    updateActiveTab({ filePath: null, content: '', savedContent: '', editorView: 'wysiwyg' })
     await editorRef.current?.setMarkdown('')
-  }, [isDirty])
+  }, [activeTab, activeTabId, flushActiveTabContent, saveTab, updateActiveTab, unsavedDialogOptions])
 
-  const loadFile = useCallback(async (path: string, content: string) => {
-    setFilePath(path)
-    setSavedContent(content)
-    setCurrentContent(content)
-    setEditorView('wysiwyg')
-    await editorRef.current?.setMarkdown(content)
-  }, [])
+  const loadFile = useCallback(
+    async (path: string, content: string) => {
+      const normalized = normalizeMarkdownImagePaths(content, path)
+      updateActiveTab({
+        filePath: path,
+        savedContent: normalized,
+        content: normalized,
+        editorView: 'wysiwyg'
+      })
+      await editorRef.current?.setMarkdown(normalized)
+    },
+    [updateActiveTab]
+  )
 
   const handleOpen = useCallback(async () => {
-    if (isDirty) {
-      const choice = window.confirm('文档已修改，是否放弃更改并打开新文件？')
-      if (!choice) return
+    const md = flushActiveTabContent()
+    if (tabIsDirty({ ...activeTab, content: md })) {
+      const action = await window.api.showUnsavedDialog(
+        unsavedDialogOptions([{ ...activeTab, content: md }])
+      )
+      if (action === 'cancel') return
+      if (action === 'save') {
+        const ok = await saveTab(activeTabId, md)
+        if (!ok) return
+      }
     }
     const result = await window.api.openFile()
     if (!result) return
     await loadFile(result.path, result.content)
-  }, [isDirty, loadFile])
+  }, [activeTab, activeTabId, flushActiveTabContent, loadFile, saveTab, unsavedDialogOptions])
 
   const openPath = useCallback(
     async (path: string) => {
-      if (isDirty) {
-        const choice = window.confirm('文档已修改，是否放弃更改并打开新文件？')
-        if (!choice) return
+      const existing = tabs.find((t) => sameFilePath(t.filePath, path))
+      if (existing) {
+        await switchTab(existing.id)
+        return
+      }
+      const md = flushActiveTabContent()
+      if (tabIsDirty({ ...activeTab, content: md })) {
+        const action = await window.api.showUnsavedDialog(
+          unsavedDialogOptions([{ ...activeTab, content: md }])
+        )
+        if (action === 'cancel') return
+        if (action === 'save') {
+          const ok = await saveTab(activeTabId, md)
+          if (!ok) return
+        }
       }
       const result = await window.api.openFilePath(path)
       if (!result) return
       await loadFile(result.path, result.content)
     },
-    [isDirty, loadFile]
+    [tabs, switchTab, flushActiveTabContent, activeTab, activeTabId, loadFile, saveTab, unsavedDialogOptions]
   )
 
   const handleOpenFolder = useCallback(async () => {
@@ -161,29 +331,14 @@ export default function App(): React.JSX.Element {
     setShowSidebar(true)
   }, [])
 
-  const handleSave = useCallback(async (options?: { silent?: boolean }) => {
-    const snapshot = getMarkdown()
-    try {
-      const result = await window.api.saveFile(filePath, snapshot)
-      if (result.canceled) return
-      if (result.error) {
-        notifyError(`保存失败：${result.error}`, options?.silent)
-        return
-      }
-      if (result.path) {
-        setFilePath(result.path)
-        const latest = getMarkdown()
-        if (latest === snapshot) {
-          setSavedContent(snapshot)
-          setCurrentContent(snapshot)
-          if (editorView === 'wysiwyg') await editorRef.current?.setMarkdown(snapshot)
-        }
-        if (folderPath) void refreshFolder(folderPath)
-      }
-    } catch (error) {
-      notifyError(`保存失败：${formatErrorMessage(error)}`, options?.silent)
-    }
-  }, [filePath, getMarkdown, folderPath, refreshFolder, editorView])
+  const handleSave = useCallback(
+    async (options?: { silent?: boolean }): Promise<boolean> => {
+      const snapshot = getMarkdown()
+      updateActiveTab({ content: snapshot })
+      return saveTab(activeTabId, snapshot, options)
+    },
+    [getMarkdown, updateActiveTab, saveTab, activeTabId]
+  )
 
   const handleSaveAs = useCallback(async () => {
     const snapshot = getMarkdown()
@@ -195,19 +350,22 @@ export default function App(): React.JSX.Element {
         return
       }
       if (result.path) {
-        setFilePath(result.path)
-        const latest = getMarkdown()
-        if (latest === snapshot) {
-          setSavedContent(snapshot)
-          setCurrentContent(snapshot)
-          if (editorView === 'wysiwyg') await editorRef.current?.setMarkdown(snapshot)
-        }
+        setTabs((prev) => {
+          const next = prev.map((t) =>
+            t.id === activeTabId
+              ? { ...t, filePath: result.path!, savedContent: snapshot, content: snapshot }
+              : t
+          )
+          if (!next.some(tabIsDirty)) void window.api.clearRecovery()
+          return next
+        })
+        if (editorView === 'wysiwyg') await editorRef.current?.setMarkdown(snapshot)
         if (folderPath) void refreshFolder(folderPath)
       }
     } catch (error) {
       notifyError(`另存为失败：${formatErrorMessage(error)}`)
     }
-  }, [filePath, getMarkdown, folderPath, refreshFolder, editorView])
+  }, [getMarkdown, filePath, updateActiveTab, editorView, folderPath, refreshFolder])
 
   const handleExportPdf = useCallback(async () => {
     try {
@@ -237,6 +395,7 @@ export default function App(): React.JSX.Element {
       const { html, defaultName, docPath } = await buildExportPayload(true)
       const result = await window.api.exportImage(html, defaultName, docPath)
       if (result.error) notifyError(`导出图片失败：${result.error}`)
+      else if (result.warning) window.alert(result.warning)
     } catch (error) {
       notifyError(`导出图片失败：${formatErrorMessage(error)}`)
     }
@@ -269,13 +428,12 @@ export default function App(): React.JSX.Element {
   const handleToggleSource = useCallback(async () => {
     if (editorView === 'wysiwyg') {
       const md = editorRef.current?.getMarkdown() ?? currentContent
-      setCurrentContent(md)
-      setEditorView('source')
+      updateActiveTab({ content: md, editorView: 'source' })
     } else {
-      setEditorView('wysiwyg')
+      updateActiveTab({ editorView: 'wysiwyg' })
       await editorRef.current?.setMarkdown(currentContent)
     }
-  }, [editorView, currentContent])
+  }, [editorView, currentContent, updateActiveTab])
 
   const handleImportTheme = useCallback(async () => {
     const result = await window.api.importTheme()
@@ -287,44 +445,227 @@ export default function App(): React.JSX.Element {
     setPrefs(result)
   }, [])
 
+  const handleCloseTab = useCallback(
+    async (tabId: string) => {
+      const tab = tabs.find((t) => t.id === tabId)
+      if (!tab) return
+      const content =
+        tabId === activeTabId ? flushActiveTabContent() : tab.content
+      if (tabIsDirty({ ...tab, content })) {
+        const action = await window.api.showUnsavedDialog(
+          unsavedDialogOptions([{ ...tab, content }])
+        )
+        if (action === 'cancel') return
+        if (action === 'save') {
+          const ok = await saveTab(tabId, content)
+          if (!ok) return
+        }
+      }
+      const remaining = tabs.filter((t) => t.id !== tabId)
+      if (remaining.length === 0) {
+        const newTab = createTab({ content: '', savedContent: '' })
+        setTabs([newTab])
+        setActiveTabId(newTab.id)
+      } else {
+        setTabs(remaining)
+        if (activeTabId === tabId) setActiveTabId(remaining[0].id)
+      }
+    },
+    [tabs, activeTabId, flushActiveTabContent, saveTab, unsavedDialogOptions]
+  )
+
+  const handleNewTab = useCallback(() => {
+    flushActiveTabContent()
+    const tab = createTab({ content: '', savedContent: '' })
+    setTabs((prev) => [...prev, tab])
+    setActiveTabId(tab.id)
+  }, [flushActiveTabContent])
+
   const handleCloseRequest = useCallback(async () => {
-    if (isDirty) {
-      const choice = window.confirm('文档已修改，确定要关闭吗？')
-      if (!choice) return
+    const md = flushActiveTabContent()
+    const dirtyTabs = tabsRef.current
+      .map((t) => (t.id === activeTabId ? { ...t, content: md } : t))
+      .filter(tabIsDirty)
+    if (dirtyTabs.length > 0) {
+      const action = await window.api.showUnsavedDialog(unsavedDialogOptions(dirtyTabs))
+      if (action === 'cancel') return
+      if (action === 'save') {
+        const ok = await saveAllDirtyTabs(dirtyTabs, activeTabId, md)
+        if (!ok) return
+      }
     }
+    await window.api.clearRecovery()
     await window.api.forceCloseWindow()
-  }, [isDirty])
+  }, [flushActiveTabContent, activeTabId, saveAllDirtyTabs, unsavedDialogOptions])
 
   const handleEditorChange = useCallback(
     (markdown: string) => {
-      if (editorView === 'wysiwyg') setCurrentContent(markdown)
+      if (editorView === 'wysiwyg') updateActiveTab({ content: markdown })
     },
-    [editorView]
+    [editorView, updateActiveTab]
   )
 
-  const handleSearchApply = useCallback(async (nextMarkdown: string) => {
-    setCurrentContent(nextMarkdown)
-    if (editorView === 'wysiwyg') await editorRef.current?.setMarkdown(nextMarkdown)
-  }, [editorView])
+  const handleSearchApply = useCallback(
+    async (nextMarkdown: string, options?: { syncCrepe?: boolean }) => {
+      updateActiveTab({ content: nextMarkdown })
+      if (options?.syncCrepe && editorView === 'wysiwyg') {
+        await editorRef.current?.setMarkdown(nextMarkdown)
+      }
+    },
+    [updateActiveTab, editorView]
+  )
+
+  const handleSearchNavigate = useCallback(
+    (matchIndex: number, query: string, caseSensitive: boolean) => {
+      const useRenderedFind = searchMode === 'find' && editorView === 'wysiwyg'
+      if (editorView === 'source' || !useRenderedFind) {
+        const matches = findMatchesInMarkdown(currentContent, query, caseSensitive)
+        const match = matches[matchIndex]
+        if (!match) return
+        if (editorView === 'source') {
+          sourceRef.current?.scrollToRange(match.start, match.end)
+        } else {
+          editorRef.current?.scrollToMatch(query, matchIndex, caseSensitive)
+        }
+      } else {
+        editorRef.current?.scrollToMatch(query, matchIndex, caseSensitive)
+      }
+    },
+    [currentContent, editorView, searchMode]
+  )
+
+  const openFind = useCallback(() => {
+    setSearchMode('find')
+  }, [])
+
+  const openReplace = useCallback(() => {
+    if (editorView === 'wysiwyg') {
+      const md = editorRef.current?.getMarkdown() ?? currentContent
+      updateActiveTab({ content: md, editorView: 'source' })
+    }
+    setSearchMode('replace')
+  }, [editorView, currentContent, updateActiveTab])
+
+  const searchFindText =
+    searchMode === 'find' && editorView === 'wysiwyg'
+      ? (editorRef.current?.getPlainText() ?? currentContent)
+      : undefined
 
   useEffect(() => {
     applyTheme('light')
-    void window.api.isMaximized().then(setIsMaximized)
-    void window.api.getPreferences().then(setPrefs)
-  }, [applyTheme])
-
-  const handleSaveRef = useRef(handleSave)
-  handleSaveRef.current = handleSave
+    void (async () => {
+      try {
+        if (hasApi()) {
+          const api = window.api
+          setIsMaximized(await api.isMaximized())
+          setPrefs(await api.getPreferences())
+          const snapshot = await api.loadRecovery()
+          if (snapshot?.tabs?.length) {
+            setPendingRecovery(snapshot)
+          }
+        } else {
+          console.error('[MyMD] window.api missing — preload did not load')
+        }
+      } catch (error) {
+        console.error('Bootstrap failed:', error)
+      } finally {
+        setTabs([initialTab])
+        setActiveTabId(initialTab.id)
+        setBootstrapped(true)
+      }
+    })()
+  }, [applyTheme, initialTab])
 
   useEffect(() => {
-    if (!prefs.autoSave || !filePath || !isDirty) return
+    if (!bootstrapped || !pendingRecovery || !hasApi()) return
+    void (async () => {
+      const snapshot = pendingRecovery
+      const when = new Date(snapshot.savedAt).toLocaleString()
+      const restore = window.confirm(`发现 ${when} 的未保存会话，是否恢复？`)
+      if (restore) {
+        const restored = snapshot.tabs.map((t) => ({
+          id: t.id,
+          filePath: t.filePath,
+          content: t.content,
+          savedContent: t.savedContent,
+          editorView: t.editorView
+        }))
+        const validActiveId = restored.some((t) => t.id === snapshot.activeTabId)
+          ? snapshot.activeTabId
+          : restored[0].id
+        setTabs(restored)
+        setActiveTabId(validActiveId)
+      } else {
+        await window.api.clearRecovery()
+      }
+      setPendingRecovery(null)
+    })()
+  }, [bootstrapped, pendingRecovery])
+
+  const saveTabRef = useRef(saveTab)
+  saveTabRef.current = saveTab
+
+  useEffect(() => {
+    if (!prefs.autoSave || !bootstrapped || !hasApi()) return
     const timer = window.setInterval(() => {
-      void handleSaveRef.current({ silent: true })
+      const snapshot = tabsRef.current
+      const activeId = activeTabIdRef.current
+      const activeContent = getMarkdownRef.current()
+      void (async () => {
+        for (const tab of snapshot) {
+          const content = tab.id === activeId ? activeContent : tab.content
+          if (!tabIsDirty({ ...tab, content })) continue
+          if (!tab.filePath) continue
+          await saveTabRef.current(tab.id, content, { silent: true })
+        }
+      })()
     }, prefs.autoSaveIntervalMs)
     return () => window.clearInterval(timer)
-  }, [prefs.autoSave, prefs.autoSaveIntervalMs, filePath, isDirty])
+  }, [prefs.autoSave, prefs.autoSaveIntervalMs, bootstrapped])
 
   useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (!event.ctrlKey && !event.metaKey) return
+      if (event.key === '=' || event.key === '+') {
+        event.preventDefault()
+        zoomIn()
+      } else if (event.key === '-') {
+        event.preventDefault()
+        zoomOut()
+      } else if (event.key === '0') {
+        event.preventDefault()
+        zoomReset()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [zoomIn, zoomOut, zoomReset])
+
+  useEffect(() => {
+    if (!bootstrapped || !hasApi()) return
+    const hasDirty = tabs.some((t) =>
+      t.id === activeTabId ? tabIsDirty({ ...t, content: getMarkdown() }) : tabIsDirty(t)
+    )
+    if (!hasDirty) return
+    const timer = window.setInterval(() => {
+      const snapshot = {
+        tabs: tabs.map((t) => ({
+          id: t.id,
+          filePath: t.filePath,
+          content: t.id === activeTabId ? getMarkdown() : t.content,
+          savedContent: t.savedContent,
+          editorView: t.id === activeTabId ? editorView : t.editorView
+        })),
+        activeTabId,
+        savedAt: new Date().toISOString()
+      }
+      void window.api.saveRecovery(snapshot)
+    }, 15000)
+    return () => window.clearInterval(timer)
+  }, [tabs, activeTabId, editorView, getMarkdown, bootstrapped])
+
+  useEffect(() => {
+    if (!bootstrapped || !hasApi()) return
     const unsubMenu = window.api.onMenuAction((action) => {
       switch (action) {
         case 'new':
@@ -391,10 +732,19 @@ export default function App(): React.JSX.Element {
           void window.api.setPreferences({ autoSave: false }).then(setPrefs)
           break
         case 'find':
-          setSearchMode('find')
+          openFind()
           break
         case 'replace':
-          setSearchMode('replace')
+          openReplace()
+          break
+        case 'zoom-in':
+          zoomIn()
+          break
+        case 'zoom-out':
+          zoomOut()
+          break
+        case 'zoom-reset':
+          zoomReset()
           break
       }
     })
@@ -442,13 +792,40 @@ export default function App(): React.JSX.Element {
     handleClearTheme,
     openPath,
     handleCloseRequest,
-    refreshFolder
+    refreshFolder,
+    openFind,
+    openReplace,
+    zoomIn,
+    zoomOut,
+    zoomReset,
+    bootstrapped
   ])
+
+  if (!bootstrapped) {
+    return (
+      <div className="flex h-screen flex-col items-center justify-center gap-2 bg-white text-gray-700">
+        <div className="text-sm font-medium">MyMD</div>
+        <div className="text-xs text-gray-500">正在加载…</div>
+      </div>
+    )
+  }
+
+  if (!hasApi()) {
+    return (
+      <div className="flex h-screen flex-col items-center justify-center gap-3 bg-white p-6 text-center text-gray-800">
+        <div className="text-base font-medium">无法连接 Electron 接口</div>
+        <p className="max-w-md text-sm text-gray-600">
+          预加载脚本未正确注入（window.api 不存在）。请关闭所有 MyMD / Electron 进程后执行：
+        </p>
+        <code className="rounded bg-gray-100 px-3 py-2 text-sm">npm run dev:clean</code>
+      </div>
+    )
+  }
 
   return (
     <div className={`flex h-screen flex-col ${theme === 'dark' ? 'dark bg-[#1e1e1e]' : 'bg-white'}`}>
       <TitleBar
-        title={getTitle()}
+        title={tabTitle(activeTab)}
         isDirty={isDirty}
         isMaximized={isMaximized}
         onMinimize={() => void window.api.minimizeWindow()}
@@ -457,6 +834,14 @@ export default function App(): React.JSX.Element {
           setIsMaximized(await window.api.isMaximized())
         }}
         onClose={() => void handleCloseRequest()}
+      />
+      <TabBar
+        tabs={tabs}
+        activeTabId={activeTabId}
+        theme={theme}
+        onSelect={(id) => void switchTab(id)}
+        onCloseTab={(id) => void handleCloseTab(id)}
+        onNewTab={handleNewTab}
       />
       <main className="relative flex min-h-0 flex-1">
         {showSidebar && (
@@ -468,19 +853,27 @@ export default function App(): React.JSX.Element {
             onOpenFile={(path) => void openPath(path)}
           />
         )}
-        <div className={`mymd-content relative min-h-0 min-w-0 flex-1 ${theme === 'dark' ? 'dark-content' : ''}`}>
+        <div
+          className={`mymd-content relative min-h-0 min-w-0 flex-1 ${theme === 'dark' ? 'dark-content' : ''}`}
+          style={{ '--mymd-zoom': editorZoomFactor(editorZoom) } as React.CSSProperties}
+          onWheel={handleEditorWheel}
+        >
           {searchMode && (
             <SearchDialog
               mode={searchMode}
               theme={theme}
+              editorView={editorView}
               markdown={currentContent}
+              findText={searchFindText}
               onClose={() => setSearchMode(null)}
-              onApply={(next) => void handleSearchApply(next)}
+              onApply={(next, opts) => void handleSearchApply(next, opts)}
+              onNavigate={handleSearchNavigate}
             />
           )}
           <CrepeEditor
+            key={activeTabId}
             ref={editorRef}
-            initialContent={DEFAULT_CONTENT}
+            initialContent={activeTab.content}
             theme={theme}
             filePath={filePath}
             focusMode={focusMode}
@@ -490,7 +883,12 @@ export default function App(): React.JSX.Element {
             onChange={handleEditorChange}
           />
           {editorView === 'source' && (
-            <SourceEditor value={currentContent} theme={theme} onChange={setCurrentContent} />
+            <SourceEditor
+              ref={sourceRef}
+              value={currentContent}
+              theme={theme}
+              onChange={(md) => updateActiveTab({ content: md })}
+            />
           )}
         </div>
         {showOutline && editorView === 'wysiwyg' && (
@@ -511,6 +909,10 @@ export default function App(): React.JSX.Element {
         focusMode={focusMode}
         typewriterMode={typewriterMode}
         autoSave={prefs.autoSave}
+        editorZoom={editorZoom}
+        onZoomIn={zoomIn}
+        onZoomOut={zoomOut}
+        onZoomReset={zoomReset}
       />
     </div>
   )

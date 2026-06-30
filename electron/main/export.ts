@@ -55,16 +55,20 @@ export async function exportHtmlToImage(
   html: string,
   outputPath: string,
   docPath?: string | null
-): Promise<void> {
+): Promise<{ truncated: boolean }> {
   const win = await loadHtmlInHiddenWindow(html, docPath)
   try {
     const height = await win.webContents.executeJavaScript(
       'Math.max(document.body.scrollHeight, document.documentElement.scrollHeight)'
     )
-    win.setContentSize(900, Math.min(Math.max(height as number, 600), 16000))
+    const rawHeight = height as number
+    const capped = Math.min(Math.max(rawHeight, 600), 16000)
+    const truncated = rawHeight > 16000
+    win.setContentSize(900, capped)
     await new Promise((resolve) => setTimeout(resolve, 200))
     const image = await win.webContents.capturePage()
     await writeFile(outputPath, image.toPNG())
+    return { truncated }
   } finally {
     win.destroy()
   }

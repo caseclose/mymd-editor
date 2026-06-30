@@ -5,12 +5,17 @@ import '@milkdown/crepe/theme/nord.css'
 import type { Theme } from '../../types/api'
 import { renderMermaidDiagrams } from '../../lib/mermaid-render'
 import { createCrepeOptions } from './crepe-config'
+import { resolveImageSrcForDisplay } from '../../lib/image-paths'
+import { selectTextInElement } from '../../lib/dom-selection'
+import { findMatchesInMarkdown } from '../../lib/search'
 
 export interface CrepeEditorHandle {
-  getMarkdown: () => string
+  getMarkdown: () => string | null
+  getPlainText: () => string
   getHtml: () => string
   renderHtml: (markdown: string) => Promise<string>
   setMarkdown: (content: string) => Promise<void>
+  scrollToMatch: (query: string, matchIndex: number, caseSensitive: boolean) => boolean
   focus: () => void
   getContainer: () => HTMLElement | null
 }
@@ -26,15 +31,11 @@ interface CrepeEditorProps {
   onChange: (markdown: string) => void
 }
 
-function toImageUrl(absolutePath: string): string {
-  const normalized = absolutePath.replace(/\\/g, '/')
-  return `file:///${normalized}`
-}
-
 const CrepeEditor = forwardRef<CrepeEditorHandle, CrepeEditorProps>(
   ({ initialContent, theme, filePath, focusMode, typewriterMode, customThemeCss, hidden, onChange }, ref) => {
     const containerRef = useRef<HTMLDivElement>(null)
     const crepeRef = useRef<Crepe | null>(null)
+    const readyRef = useRef(false)
     const renderLockRef = useRef<Promise<string> | null>(null)
     const filePathRef = useRef(filePath)
     const themeRef = useRef(theme)
@@ -42,6 +43,10 @@ const CrepeEditor = forwardRef<CrepeEditorHandle, CrepeEditorProps>(
     filePathRef.current = filePath
     themeRef.current = theme
     onChangeRef.current = onChange
+
+    const proxyDomURL = useCallback((url: string) => {
+      return resolveImageSrcForDisplay(url, filePathRef.current)
+    }, [])
 
     const uploadImage = useCallback(async (file: File): Promise<string> => {
       const docPath = filePathRef.current
@@ -52,18 +57,28 @@ const CrepeEditor = forwardRef<CrepeEditorHandle, CrepeEditorProps>(
       const buffer = await file.arrayBuffer()
       const result = await window.api.saveImageBuffer(docPath, buffer, file.name)
       if (!result) throw new Error('Failed to save image')
-      return toImageUrl(result.absolutePath)
+      return result.relativePath
     }, [])
 
-    const initCrepe = async (content: string): Promise<void> => {
-      if (!containerRef.current) return
-      const crepe = new Crepe(createCrepeOptions(containerRef.current, content, uploadImage))
-      crepeRef.current = crepe
+    const initCrepe = async (content: string, isStale: () => boolean): Promise<void> => {
+      const container = containerRef.current
+      if (!container) return
+
+      readyRef.current = false
+      const crepe = new Crepe(createCrepeOptions(container, content, uploadImage, proxyDomURL))
       await crepe.create()
+
+      if (isStale() || containerRef.current !== container) {
+        await crepe.destroy()
+        return
+      }
+
+      crepeRef.current = crepe
+      readyRef.current = true
       crepe.on((listener) => {
         listener.markdownUpdated((_ctx, markdown) => {
           onChangeRef.current(markdown)
-          void renderMermaidDiagrams(containerRef.current!, themeRef.current)
+          void renderMermaidDiagrams(containerRef.current, themeRef.current, true)
         })
       })
       await renderMermaidDiagrams(containerRef.current, themeRef.current)
@@ -81,7 +96,7 @@ const CrepeEditor = forwardRef<CrepeEditorHandle, CrepeEditorProps>(
         document.body.appendChild(host)
         let crepe: Crepe | null = null
         try {
-          crepe = new Crepe(createCrepeOptions(host, markdown, uploadImage))
+          crepe = new Crepe(createCrepeOptions(host, markdown, uploadImage, proxyDomURL))
           await crepe.create()
           await renderMermaidDiagrams(host, themeRef.current)
           return host.querySelector('.milkdown')?.innerHTML ?? host.innerHTML
@@ -100,21 +115,51 @@ const CrepeEditor = forwardRef<CrepeEditorHandle, CrepeEditorProps>(
     }
 
     useImperativeHandle(ref, () => ({
-      getMarkdown: () => crepeRef.current?.getMarkdown() ?? '',
+      getMarkdown: () => {
+        if (!readyRef.current || !crepeRef.current) return null
+        try {
+          return crepeRef.current.getMarkdown()
+        } catch {
+          return null
+        }
+      },
+      getPlainText: () => {
+        const pm = containerRef.current?.querySelector('.ProseMirror')
+        return pm?.textContent ?? ''
+      },
       getHtml: () =>
         containerRef.current?.querySelector('.milkdown')?.innerHTML ??
         containerRef.current?.innerHTML ??
         '',
       renderHtml: renderHtmlFromMarkdown,
       setMarkdown: async (content: string) => {
+        let current = ''
+        if (readyRef.current && crepeRef.current) {
+          try {
+            current = crepeRef.current.getMarkdown()
+          } catch {
+            current = ''
+          }
+        }
+        if (current === content) return
+        readyRef.current = false
         if (crepeRef.current) {
           await crepeRef.current.destroy()
           crepeRef.current = null
         }
         if (containerRef.current) {
           containerRef.current.innerHTML = ''
-          await initCrepe(content)
+          await initCrepe(content, () => false)
         }
+      },
+      scrollToMatch: (query: string, matchIndex: number, caseSensitive: boolean) => {
+        const pm = containerRef.current?.querySelector('.ProseMirror')
+        if (!pm || !(pm instanceof HTMLElement) || !query) return false
+        const plainText = pm.textContent ?? ''
+        const matches = findMatchesInMarkdown(plainText, query, caseSensitive)
+        const match = matches[matchIndex]
+        if (!match) return false
+        return selectTextInElement(pm, match.start, match.end - match.start)
       },
       focus: () => {
         containerRef.current?.querySelector('[contenteditable="true"]')?.dispatchEvent(new FocusEvent('focus'))
@@ -123,11 +168,11 @@ const CrepeEditor = forwardRef<CrepeEditorHandle, CrepeEditorProps>(
     }))
 
     useEffect(() => {
-      const setup = async (): Promise<void> => {
-        await initCrepe(initialContent)
-      }
-      void setup()
+      let stale = false
+      void initCrepe(initialContent, () => stale)
       return () => {
+        stale = true
+        readyRef.current = false
         void crepeRef.current?.destroy()
         crepeRef.current = null
       }

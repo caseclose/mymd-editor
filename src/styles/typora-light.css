@@ -1,7 +1,7 @@
 /* Typora-inspired light theme for markdown content */
 .mymd-content {
   font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
-  font-size: 16px;
+  font-size: calc(16px * var(--mymd-zoom, 1));
   line-height: 1.75;
   color: #24292e;
   max-width: 860px;
